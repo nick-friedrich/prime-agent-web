@@ -205,3 +205,175 @@ $$('.toast').forEach(toast => {
     $('button', toast)?.addEventListener('click', () => toast.remove());
     setTimeout(() => toast.remove(), 5000);
 });
+
+const chatRoot = $('[data-chat]');
+if (chatRoot) {
+    const transcriptNode = $('[data-chat-transcript]', chatRoot);
+    const scrollNode = $('[data-chat-scroll]', chatRoot);
+    const emptyNode = $('[data-chat-empty]', chatRoot);
+    const composer = $('[data-chat-composer]', chatRoot);
+    const input = $('[data-chat-input]', chatRoot);
+    const feedback = $('[data-chat-feedback]', chatRoot);
+    const count = $('[data-chat-count]', chatRoot);
+    const initialNode = $('[data-chat-initial]');
+    let etag = null;
+    let polling = false;
+
+    const atBottom = () => scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight < 90;
+    const formatTime = value => {
+        if (!value) return '';
+        const date = new Date(value);
+        return Number.isNaN(date.valueOf()) ? '' : new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date);
+    };
+    const codeBlock = (label, value) => {
+        if (!value) return null;
+        const block = document.createElement('div');
+        const heading = document.createElement('small');
+        const pre = document.createElement('pre');
+        heading.textContent = label;
+        pre.textContent = value;
+        block.append(heading, pre);
+        return block;
+    };
+    const renderItem = (item, expanded) => {
+        if (item.type === 'tool') {
+            const details = document.createElement('details');
+            details.className = `tool-activity${item.error ? ' error' : ''}`;
+            details.dataset.entryId = item.id;
+            details.open = expanded.has(item.id);
+            const summary = document.createElement('summary');
+            const icon = document.createElement('span');
+            const title = document.createElement('strong');
+            const hint = document.createElement('small');
+            icon.textContent = item.error ? '!' : '›';
+            title.textContent = item.name || 'Tool activity';
+            hint.textContent = item.error ? 'failed' : (item.output ? 'completed' : 'running');
+            summary.append(icon, title, hint);
+            const body = document.createElement('div');
+            body.className = 'tool-body';
+            const argumentsBlock = codeBlock('Input', item.arguments);
+            const outputBlock = codeBlock(item.error ? 'Error output' : 'Output', item.output);
+            if (argumentsBlock) body.append(argumentsBlock);
+            if (outputBlock) body.append(outputBlock);
+            if (item.truncated) {
+                const notice = document.createElement('p');
+                notice.textContent = 'Output truncated to keep this chat responsive.';
+                body.append(notice);
+            }
+            details.append(summary, body);
+            return details;
+        }
+
+        const article = document.createElement('article');
+        article.className = `chat-message ${item.role}`;
+        article.dataset.entryId = item.id;
+        const meta = document.createElement('div');
+        const author = document.createElement('strong');
+        const time = document.createElement('time');
+        author.textContent = item.label || (item.role === 'user' ? 'You' : item.role === 'assistant' ? 'Prime Agent' : 'System');
+        time.textContent = formatTime(item.timestamp);
+        meta.append(author, time);
+        const content = document.createElement('div');
+        content.className = 'message-content';
+        content.innerHTML = item.html || '';
+        article.append(meta, content);
+        return article;
+    };
+    const render = payload => {
+        const shouldFollow = atBottom() || transcriptNode.children.length === 0;
+        const expanded = new Set($$('details[open][data-entry-id]', transcriptNode).map(node => node.dataset.entryId));
+        const items = payload.transcript?.items || [];
+        transcriptNode.replaceChildren(...items.map(item => renderItem(item, expanded)));
+        emptyNode.hidden = items.length > 0;
+        if (payload.transcript?.available === false) {
+            emptyNode.hidden = false;
+            $('h2', emptyNode).textContent = 'Transcript unavailable';
+            $('p', emptyNode).textContent = payload.transcript.error || 'Prime Agent has not written this transcript yet.';
+        }
+        const agent = payload.agent || {};
+        if (count) count.textContent = agent.messageCount ?? items.filter(item => item.type === 'message').length;
+        const status = $('[data-chat-status]', chatRoot);
+        if (status) {
+            const archived = agent.lifecycle === 'archived';
+            const working = agent.activity === 'working';
+            status.className = `status-pill ${working ? 'running' : archived ? 'paused' : 'idle'}`;
+            status.replaceChildren(document.createElement('i'), document.createTextNode(archived ? 'archived' : working ? 'working' : 'idle'));
+        }
+        if (shouldFollow) requestAnimationFrame(() => { scrollNode.scrollTop = scrollNode.scrollHeight; });
+    };
+    const poll = async () => {
+        if (polling || document.hidden) return;
+        polling = true;
+        try {
+            const headers = { Accept: 'application/json' };
+            if (etag) headers['If-None-Match'] = etag;
+            const response = await fetch(chatRoot.dataset.transcriptUrl, { headers });
+            if (response.status === 304) return;
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.message || 'Could not refresh the transcript.');
+            etag = response.headers.get('ETag');
+            render(body);
+        } catch (error) {
+            feedback.textContent = error.message || 'Could not refresh the transcript.';
+            feedback.classList.add('error');
+        } finally {
+            polling = false;
+        }
+    };
+
+    try { render(JSON.parse(initialNode.textContent)); } catch { poll(); }
+    setInterval(poll, 2000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+    const resizeInput = () => {
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+    };
+    input.addEventListener('input', resizeInput);
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+            event.preventDefault();
+            composer.requestSubmit();
+        }
+    });
+    composer.addEventListener('submit', async event => {
+        event.preventDefault();
+        const message = input.value.trim();
+        if (!message) return;
+        const button = $('button', composer);
+        button.disabled = true;
+        input.disabled = true;
+        feedback.classList.remove('error', 'success');
+        feedback.textContent = 'Sending…';
+        try {
+            const response = await fetch(chatRoot.dataset.messageUrl, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').content,
+                },
+                body: JSON.stringify({ message }),
+            });
+            const body = await response.json();
+            if (!response.ok) {
+                const validation = body.errors?.message?.[0];
+                throw new Error(validation || body.message || 'Prime Agent did not accept the message.');
+            }
+            input.value = '';
+            resizeInput();
+            const delivery = body.receipt?.deliveryStatus === 'queued' ? 'Queued for the agent.' : 'Delivered to the agent.';
+            feedback.textContent = delivery;
+            feedback.classList.add('success');
+            etag = null;
+            await poll();
+        } catch (error) {
+            feedback.textContent = error.message || 'Could not send the message.';
+            feedback.classList.add('error');
+        } finally {
+            button.disabled = false;
+            input.disabled = false;
+            input.focus();
+        }
+    });
+}

@@ -149,6 +149,29 @@ class PrimeAgentRuntime
         return ['activeSessionId' => null, 'sessionName' => $name, 'cwd' => $cwd];
     }
 
+    /** @return array<string, mixed> */
+    public function send(string $sessionId, string $message): array
+    {
+        $result = $this->run(['send', '--json', $sessionId, '--message', $message], 35);
+        if (! $result['successful']) {
+            throw new \RuntimeException($result['error'] ?: 'Prime Agent did not accept the message.');
+        }
+
+        $payload = json_decode($result['output'], true);
+        if (! is_array($payload)) {
+            throw new \RuntimeException('Prime Agent returned an invalid message receipt.');
+        }
+
+        $receipt = [];
+        foreach ($payload as $key => $value) {
+            if (is_string($key)) {
+                $receipt[$key] = $value;
+            }
+        }
+
+        return $receipt;
+    }
+
     /** @phpstan-impure */
     private function canListAgents(): bool
     {

@@ -85,14 +85,15 @@
                         $status = $archived ? 'archived' : ($working ? 'working' : 'idle');
                         $model = $agent['model'] ?? null;
                     @endphp
-                    <article class="session-row">
+                    @php($sessionId = $agent['id'] ?? $agent['activeSessionId'] ?? null)
+                    <a class="session-row" href="{{ $sessionId ? route('agents.show', ['sessionId' => $sessionId]) : '#' }}" aria-label="Open {{ $agent['sessionName'] ?? 'agent session' }}">
                         <span class="session-symbol {{ $status }}">{{ $working ? '↯' : '⌁' }}</span>
                         <div class="session-main"><h3>{{ $agent['sessionName'] ?? Str::limit($agent['firstMessage'] ?? 'Unnamed agent', 72) }}</h3><p>{{ $agent['cwd'] ?? 'Unknown project' }}</p></div>
                         <span class="status-pill {{ $working ? 'running' : ($archived ? 'paused' : 'idle') }}"><i></i>{{ $status }}</span>
                         <div class="session-stat"><small>Messages</small><strong>{{ $agent['messageCount'] ?? 0 }}</strong></div>
                         <div class="session-stat"><small>Model</small><strong>{{ is_array($model) ? (($model['provider'] ?? '').'/'.($model['id'] ?? '')) : 'Default' }}</strong></div>
                         <code>{{ substr($agent['activeSessionId'] ?? $agent['id'] ?? '', -8) }}</code>
-                    </article>
+                    </a>
                     @endforeach
                 </div>
             </section>
