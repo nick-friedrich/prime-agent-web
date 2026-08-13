@@ -12,7 +12,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('slug')->unique();
-            $table->string('repository')->nullable();
+            $table->string('path');
             $table->string('color')->default('#C8FF58');
             $table->text('description')->nullable();
             $table->timestamps();

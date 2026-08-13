@@ -1,32 +1,32 @@
 # Prime Agent Web
 
-A Laravel and TailwindCSS mission-control interface for orchestrating multiple Prime Agent projects and autonomous agents.
+A local Laravel dashboard for Prime Agent. It starts with no demonstration data and reads agent sessions directly from the installed Prime Agent daemon.
 
-## Features
-
-- Multi-project workspace with project-level filtering
-- Agent deployment with model, project, and goal configuration
-- Agent status controls for running, paused, and idle states
-- Persistent tasks, progress, token usage, and runtime activity
-- Responsive desktop and mobile layouts
-- Keyboard-accessible quick search (`⌘/Ctrl + K`)
-
-## Local setup
+## Start
 
 ```bash
-composer install
-npm install
-cp .env.example .env
-php artisan key:generate
-touch database/database.sqlite
-php artisan migrate --seed
-npm run build
-php artisan serve
+composer setup
+composer dev
 ```
 
-Run the verification suite with:
+`composer dev` starts the Prime Agent daemon when available, followed by Laravel, Vite, the queue worker, and application logs. Opening the dashboard directly also attempts to start the daemon automatically.
+
+The dashboard then guides you through:
+
+1. Installing/detecting Prime Agent
+2. Starting the local runtime
+3. Connecting an existing local Git repository
+4. Starting a real agent with a goal
+
+If the CLI is installed outside the web process path, add its absolute location to `.env`:
+
+```dotenv
+PRIME_AGENT_BINARY=/absolute/path/to/prime-agent
+```
+
+## Verify
 
 ```bash
-php artisan test
+composer test
 npm run build
 ```
