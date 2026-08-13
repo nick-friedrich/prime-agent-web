@@ -43,13 +43,14 @@ class DashboardController extends Controller
 
     public function storeProject(Request $request): RedirectResponse
     {
-        $data = $request->validate([
+        $request->validate([
             'name' => ['required', 'string', 'max:80'],
             'path' => ['required', 'string', 'max:500'],
             'description' => ['nullable', 'string', 'max:500'],
         ]);
 
-        $path = realpath($data['path']);
+        $name = $request->string('name')->toString();
+        $path = realpath($request->string('path')->toString());
         if ($path === false || ! is_dir($path)) {
             throw ValidationException::withMessages(['path' => 'Choose an existing local project directory.']);
         }
@@ -57,17 +58,22 @@ class DashboardController extends Controller
             throw ValidationException::withMessages(['path' => 'This directory is not a Git repository yet. Run git init there first.']);
         }
 
-        $data['path'] = $path;
-        $data['slug'] = Str::slug($data['name']).'-'.Str::lower(Str::random(4));
-        $data['color'] = ['#C8FF58', '#8B7CFF', '#52D9CB', '#FF9E6D'][Project::count() % 4];
-        Project::create($data);
+        Project::create([
+            'name' => $name,
+            'path' => $path,
+            'description' => $request->filled('description')
+                ? $request->string('description')->toString()
+                : null,
+            'slug' => Str::slug($name).'-'.Str::lower(Str::random(4)),
+            'color' => ['#C8FF58', '#8B7CFF', '#52D9CB', '#FF9E6D'][Project::count() % 4],
+        ]);
 
         return back()->with('success', 'Project connected. You can now start an agent.');
     }
 
     public function storeAgent(Request $request): RedirectResponse
     {
-        $data = $request->validate([
+        $request->validate([
             'project_id' => ['required', 'exists:projects,id'],
             'name' => ['required', 'string', 'max:80'],
             'goal' => ['required', 'string', 'max:800'],
@@ -82,14 +88,16 @@ class DashboardController extends Controller
             return back()->withErrors(['prime_agent' => $daemon['error'] ?: 'Prime Agent could not start.']);
         }
 
-        $project = Project::findOrFail($data['project_id']);
+        $project = Project::query()->findOrFail($request->integer('project_id'));
+        $name = $request->string('name')->toString();
+        $goal = $request->string('goal')->toString();
 
         try {
-            $this->runtime->create($data['name'], $project->path, $data['goal']);
+            $this->runtime->create($name, $project->path, $goal);
         } catch (\RuntimeException $error) {
             return back()->withInput()->withErrors(['prime_agent' => $error->getMessage()]);
         }
 
-        return back()->with('success', $data['name'].' was started in Prime Agent.');
+        return back()->with('success', $name.' was started in Prime Agent.');
     }
 }

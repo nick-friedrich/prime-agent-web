@@ -23,9 +23,12 @@ class PrimeAgentRuntime
         return $this->binary() !== null;
     }
 
+    /** @return array{online: bool, error: string|null} */
     public function ensureDaemon(): array
     {
-        if (! $this->binary()) {
+        $binary = $this->binary();
+
+        if ($binary === null) {
             return ['online' => false, 'error' => 'Prime Agent is not installed.'];
         }
 
@@ -35,7 +38,7 @@ class PrimeAgentRuntime
 
         $launcher = new Process([
             '/bin/sh', '-c', 'exec "$1" --mode daemon </dev/null >/dev/null 2>&1 &',
-            'prime-agent-daemon', $this->binary(),
+            'prime-agent-daemon', $binary,
         ], base_path());
         $launcher->setTimeout(3);
 
@@ -60,6 +63,7 @@ class PrimeAgentRuntime
         ];
     }
 
+    /** @return list<array<string, mixed>> */
     public function agents(): array
     {
         $result = $this->run(['list', '--all', '--json']);
@@ -70,16 +74,54 @@ class PrimeAgentRuntime
 
         $payload = json_decode($result['output'], true);
 
-        return is_array($payload['sessions'] ?? null) ? $payload['sessions'] : [];
+        if (! is_array($payload)) {
+            return [];
+        }
+
+        $rawSessions = $payload['sessions'] ?? null;
+
+        if (! is_array($rawSessions)) {
+            return [];
+        }
+
+        $sessions = [];
+        foreach ($rawSessions as $rawSession) {
+            if (! is_array($rawSession)) {
+                continue;
+            }
+
+            $session = [];
+            foreach ($rawSession as $key => $value) {
+                if (is_string($key)) {
+                    $session[$key] = $value;
+                }
+            }
+            $sessions[] = $session;
+        }
+
+        return $sessions;
     }
 
+    /** @return array<string, mixed> */
     public function create(string $name, string $cwd, string $goal): array
     {
-        $knownIds = collect($this->agents())->pluck('activeSessionId')->filter()->all();
+        $binary = $this->binary();
+        if ($binary === null) {
+            throw new \RuntimeException('Prime Agent is not installed.');
+        }
+
+        $knownIds = [];
+        foreach ($this->agents() as $knownAgent) {
+            $knownId = $knownAgent['activeSessionId'] ?? null;
+            if (is_string($knownId)) {
+                $knownIds[] = $knownId;
+            }
+        }
+
         $log = storage_path('logs/prime-agent-'.now()->format('Ymd-His').'.jsonl');
         $launcher = new Process([
             '/bin/sh', '-c', 'exec "$1" --mode json --cwd "$2" --goal "$3" -- "$3" </dev/null >>"$4" 2>&1 &',
-            'prime-agent-session', $this->binary(), $cwd, $goal, $log,
+            'prime-agent-session', $binary, $cwd, $goal, $log,
         ], base_path());
         $launcher->setTimeout(3);
         $launcher->run();
@@ -94,7 +136,7 @@ class PrimeAgentRuntime
                 && ! in_array($candidate['activeSessionId'] ?? null, $knownIds, true)
             );
 
-            if ($agent) {
+            if ($agent !== null) {
                 $activeSessionId = $agent['activeSessionId'] ?? null;
                 if (is_string($activeSessionId)) {
                     $this->run(['rename', $activeSessionId, $name]);
@@ -113,6 +155,10 @@ class PrimeAgentRuntime
         return $this->run(['list', '--all', '--json'], 2)['successful'];
     }
 
+    /**
+     * @param  list<string>  $arguments
+     * @return array{successful: bool, output: string, error: string}
+     */
     private function run(array $arguments, int $timeout = 5): array
     {
         $binary = $this->binary();
