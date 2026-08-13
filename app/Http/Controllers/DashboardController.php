@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Project;
 use App\Services\PrimeAgentRuntime;
+use App\Services\ProjectDiscovery;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -12,22 +13,34 @@ use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    public function __construct(private readonly PrimeAgentRuntime $runtime) {}
+    public function __construct(
+        private readonly PrimeAgentRuntime $runtime,
+        private readonly ProjectDiscovery $projectDiscovery,
+    ) {}
 
     public function index(Request $request): View
     {
-        $projects = Project::orderBy('name')->get();
-        $activeProject = $request->filled('project')
-            ? $projects->firstWhere('slug', $request->string('project'))
-            : null;
         $primeAgentAvailable = $this->runtime->isAvailable();
         $daemon = $primeAgentAvailable && ! app()->runningUnitTests()
             ? $this->runtime->ensureDaemon()
             : ['online' => false, 'error' => null];
-        $agents = $daemon['online'] ? collect($this->runtime->agents()) : collect();
+        $agentList = $daemon['online'] ? $this->runtime->agents() : [];
+
+        $this->projectDiscovery->syncFromSessions($agentList);
+
+        $projects = Project::orderBy('name')->get();
+        $activeProject = $request->filled('project')
+            ? $projects->firstWhere('slug', $request->string('project'))
+            : null;
+        $agents = collect($agentList);
 
         if ($activeProject) {
-            $agents = $agents->where('cwd', $activeProject->path)->values();
+            $agents = $agents->filter(function (array $agent) use ($activeProject): bool {
+                $cwd = $agent['cwd'] ?? null;
+
+                return is_string($cwd)
+                    && $this->projectDiscovery->projectPath($cwd) === $activeProject->path;
+            })->values();
         }
 
         return view('dashboard', [
@@ -54,7 +67,7 @@ class DashboardController extends Controller
         if ($path === false || ! is_dir($path)) {
             throw ValidationException::withMessages(['path' => 'Choose an existing local project directory.']);
         }
-        if (! is_dir($path.'/.git')) {
+        if (! file_exists($path.'/.git')) {
             throw ValidationException::withMessages(['path' => 'This directory is not a Git repository yet. Run git init there first.']);
         }
 

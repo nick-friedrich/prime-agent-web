@@ -14,7 +14,8 @@ Prime Agent Web connects to the Prime Agent CLI and daemon running on your machi
 
 - Detects your local Prime Agent installation
 - Starts the Prime Agent daemon when needed
-- Connects existing local Git repositories as projects
+- Automatically discovers Git projects from Prime Agent session working directories
+- Lets you connect additional local Git repositories manually
 - Starts daemon-backed agents with a name and goal
 - Lists and filters sessions reported by the local daemon
 - Keeps application data local in SQLite

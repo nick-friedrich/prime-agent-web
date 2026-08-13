@@ -102,10 +102,27 @@
 </div>
 
 <dialog id="project-modal" class="modal">
-    <form method="POST" action="{{ route('projects.store') }}">@csrf
+    <form method="POST" action="{{ route('projects.store') }}" data-project-form>@csrf
         <div class="modal-heading"><div><span class="modal-icon">⌘</span><div><h2>Connect a project</h2><p>Choose an existing local Git repository.</p></div></div><button type="button" data-close-modal>×</button></div>
-        <label>Project name<input name="name" required value="{{ old('name') }}" placeholder="e.g. My application"></label>
-        <label>Absolute directory path<input name="path" required value="{{ old('path') }}" placeholder="/Users/you/dev/my-project"></label>
+        <label>Project name<input name="name" required value="{{ old('name') }}" placeholder="e.g. My application" data-project-name></label>
+        <div class="directory-field">
+            <label for="project-path">Project directory</label>
+            <div class="directory-picker" data-directory-picker data-search-url="{{ route('project-directories.search') }}" data-browse-url="{{ route('project-directories.browse') }}">
+                <div class="directory-tabs" role="tablist" aria-label="Choose directory method">
+                    <button type="button" class="active" role="tab" aria-selected="true" data-directory-mode="search">Search repositories</button>
+                    <button type="button" role="tab" aria-selected="false" data-directory-mode="browse">Browse folders</button>
+                </div>
+                <section class="directory-panel" data-directory-panel="search">
+                    <div class="directory-search"><span aria-hidden="true">⌕</span><input type="search" autocomplete="off" placeholder="Search by repository name or path" aria-label="Search local repositories" aria-controls="directory-search-results" data-directory-search></div>
+                    <div id="directory-search-results" class="directory-results" role="listbox" aria-live="polite" data-directory-results><p>Start typing or browse all discovered repositories.</p></div>
+                </section>
+                <section class="directory-panel" data-directory-panel="browse" hidden>
+                    <div class="directory-location"><button type="button" data-directory-up disabled aria-label="Go to parent directory">↑</button><code data-directory-current>Home</code><button type="button" data-directory-use hidden>Use repository</button></div>
+                    <div class="directory-results browse-results" aria-live="polite" data-directory-browse-results><p>Loading folders…</p></div>
+                </section>
+            </div>
+            <label class="manual-path" for="project-path"><span>Or enter an absolute path</span><input id="project-path" name="path" required value="{{ old('path') }}" placeholder="/Users/you/dev/my-project" data-project-path></label>
+        </div>
         <label>Description <span>Optional</span><textarea name="description" rows="3" placeholder="What are you building?">{{ old('description') }}</textarea></label>
         <div class="trust-note"><span>!</span><p><b>Prime Agent can edit this repository</b><small>Only connect a project whose contents and instructions you trust.</small></p></div>
         <div class="modal-actions"><button type="button" class="secondary-button" data-close-modal>Cancel</button><button class="primary-button">Connect project</button></div>
