@@ -150,13 +150,12 @@ class ExampleTest extends TestCase
         $runtime = Mockery::mock(PrimeAgentRuntime::class);
         $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
         $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
-        $runtime->shouldReceive('create')->once()->with('Release Pilot', base_path(), 'Prepare a safe release.')
+        $runtime->shouldReceive('create')->once()->with(base_path(), 'Prepare a safe release.')
             ->andReturn(['activeSessionId' => 'session-1']);
         $this->app->instance(PrimeAgentRuntime::class, $runtime);
 
         $this->post('/agents', [
             'project_id' => $project->id,
-            'name' => 'Release Pilot',
             'goal' => 'Prepare a safe release.',
         ])->assertRedirect()->assertSessionHas('success');
     }
@@ -172,7 +171,6 @@ class ExampleTest extends TestCase
 
         $this->post('/agents', [
             'project_id' => $project->id,
-            'name' => 'Release Pilot',
             'goal' => 'Prepare a safe release.',
         ])->assertSessionHasErrors('prime_agent');
     }

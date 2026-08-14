@@ -88,7 +88,6 @@ class DashboardController extends Controller
     {
         $request->validate([
             'project_id' => ['required', 'exists:projects,id'],
-            'name' => ['required', 'string', 'max:80'],
             'goal' => ['required', 'string', 'max:800'],
         ]);
 
@@ -102,15 +101,14 @@ class DashboardController extends Controller
         }
 
         $project = Project::query()->findOrFail($request->integer('project_id'));
-        $name = $request->string('name')->toString();
         $goal = $request->string('goal')->toString();
 
         try {
-            $this->runtime->create($name, $project->path, $goal);
+            $this->runtime->create($project->path, $goal);
         } catch (\RuntimeException $error) {
             return back()->withInput()->withErrors(['prime_agent' => $error->getMessage()]);
         }
 
-        return back()->with('success', $name.' was started in Prime Agent.');
+        return back()->with('success', 'The agent was started in Prime Agent.');
     }
 }

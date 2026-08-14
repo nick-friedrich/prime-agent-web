@@ -216,6 +216,8 @@ if (chatRoot) {
     const feedback = $('[data-chat-feedback]', chatRoot);
     const count = $('[data-chat-count]', chatRoot);
     const currentActivity = $('[data-current-activity]', chatRoot);
+    const sendButton = $('[data-composer-send]', chatRoot);
+    const stopButton = $('[data-composer-stop]', chatRoot);
     const initialNode = $('[data-chat-initial]');
     let etag = null;
     let polling = false;
@@ -322,6 +324,9 @@ if (chatRoot) {
         }
         const agent = payload.agent || {};
         if (count) count.textContent = agent.messageCount ?? items.filter(item => item.type === 'message').length;
+        const canStop = agent.activity === 'working' && Boolean(agent.activeSessionId);
+        sendButton.hidden = canStop;
+        stopButton.hidden = !canStop;
         const status = $('[data-chat-status]', chatRoot);
         if (status) {
             const archived = agent.lifecycle === 'archived';
@@ -378,8 +383,7 @@ if (chatRoot) {
         event.preventDefault();
         const message = input.value.trim();
         if (!message) return;
-        const button = $('button', composer);
-        button.disabled = true;
+        sendButton.disabled = true;
         input.disabled = true;
         feedback.classList.remove('error', 'success');
         feedback.textContent = 'Sending…';
@@ -409,9 +413,32 @@ if (chatRoot) {
             feedback.textContent = error.message || 'Could not send the message.';
             feedback.classList.add('error');
         } finally {
-            button.disabled = false;
+            sendButton.disabled = false;
             input.disabled = false;
             input.focus();
+        }
+    });
+
+    stopButton.addEventListener('click', async () => {
+        if (!window.confirm('Stop this agent? You can resume its saved session later.')) return;
+        stopButton.disabled = true;
+        feedback.classList.remove('error', 'success');
+        feedback.textContent = 'Stopping…';
+        try {
+            const response = await fetch(chatRoot.dataset.stopUrl, {
+                method: 'DELETE',
+                headers: {
+                    Accept: 'application/json',
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').content,
+                },
+            });
+            const body = await response.json();
+            if (!response.ok) throw new Error(body.message || 'Prime Agent could not stop the agent.');
+            window.location.assign(body.redirect);
+        } catch (error) {
+            feedback.textContent = error.message || 'Could not stop the agent.';
+            feedback.classList.add('error');
+            stopButton.disabled = false;
         }
     });
 }

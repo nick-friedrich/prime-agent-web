@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Services\AgentTranscriptReader;
 use App\Services\PrimeAgentRuntime;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\View\View;
@@ -68,6 +69,29 @@ class AgentChatController extends Controller
         return response()->json(['receipt' => $receipt], 202);
     }
 
+    public function destroy(Request $request, string $sessionId): JsonResponse|RedirectResponse
+    {
+        $agent = $this->resolveAgent($sessionId);
+        $activeSessionId = $agent['activeSessionId'] ?? null;
+        abort_unless(is_string($activeSessionId) && $activeSessionId !== '', 409, 'This agent is not currently running.');
+
+        try {
+            $this->runtime->stop($activeSessionId);
+        } catch (\RuntimeException $error) {
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $error->getMessage()], 503);
+            }
+
+            return back()->withErrors(['prime_agent' => $error->getMessage()]);
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['redirect' => route('dashboard')]);
+        }
+
+        return redirect()->route('dashboard')->with('success', 'The agent was stopped. Its session remains available to resume later.');
+    }
+
     /** @return array<string, mixed> */
     private function resolveAgent(string $sessionId): array
     {
@@ -93,7 +117,6 @@ class AgentChatController extends Controller
         return [
             'id' => $agent['id'] ?? null,
             'activeSessionId' => $agent['activeSessionId'] ?? null,
-            'sessionName' => $agent['sessionName'] ?? null,
             'cwd' => $agent['cwd'] ?? null,
             'activity' => $agent['activity'] ?? null,
             'lifecycle' => $agent['lifecycle'] ?? null,

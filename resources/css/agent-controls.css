@@ -1,0 +1,28 @@
+.composer-stop {
+    height: 34px;
+    width: 36px;
+    flex: 0 0 36px;
+    padding: 0;
+    border: 1px solid #55332f;
+    border-radius: 7px;
+    background: #1b1413;
+    color: var(--coral);
+    font-size: 9px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    cursor: pointer;
+}
+
+.composer-stop:hover {
+    border-color: #78453e;
+    background: #261817;
+    color: #ff9a89;
+}
+
+.composer-stop:disabled {
+    cursor: wait;
+    opacity: .45;
+}

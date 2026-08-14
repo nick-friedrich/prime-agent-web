@@ -86,14 +86,14 @@
                         $model = $agent['model'] ?? null;
                     @endphp
                     @php($sessionId = $agent['id'] ?? $agent['activeSessionId'] ?? null)
-                    <a class="session-row" href="{{ $sessionId ? route('agents.show', ['sessionId' => $sessionId]) : '#' }}" aria-label="Open {{ $agent['sessionName'] ?? 'agent session' }}">
+                    <div class="session-row">
                         <span class="session-symbol {{ $status }}">{{ $working ? '↯' : '⌁' }}</span>
-                        <div class="session-main"><h3>{{ $agent['sessionName'] ?? Str::limit($agent['firstMessage'] ?? 'Unnamed agent', 72) }}</h3><p>{{ $agent['cwd'] ?? 'Unknown project' }}</p></div>
+                        <div class="session-main"><h3><a href="{{ $sessionId ? route('agents.show', ['sessionId' => $sessionId]) : '#' }}">{{ Str::limit($agent['firstMessage'] ?? 'Agent session', 72) }}</a></h3><p>{{ $agent['cwd'] ?? 'Unknown project' }}</p></div>
                         <span class="status-pill {{ $working ? 'running' : ($archived ? 'paused' : 'idle') }}"><i></i>{{ $status }}</span>
                         <div class="session-stat"><small>Messages</small><strong>{{ $agent['messageCount'] ?? 0 }}</strong></div>
                         <div class="session-stat"><small>Model</small><strong>{{ is_array($model) ? (($model['provider'] ?? '').'/'.($model['id'] ?? '')) : 'Default' }}</strong></div>
                         <code>{{ substr($agent['activeSessionId'] ?? $agent['id'] ?? '', -8) }}</code>
-                    </a>
+                    </div>
                     @endforeach
                 </div>
             </section>
@@ -133,7 +133,6 @@
 <dialog id="agent-modal" class="modal">
     <form method="POST" action="{{ route('agents.store') }}">@csrf
         <div class="modal-heading"><div><span class="modal-icon agent">↯</span><div><h2>Start a Prime Agent</h2><p>This creates a real daemon-backed session.</p></div></div><button type="button" data-close-modal>×</button></div>
-        <label>Agent name<input name="name" required value="{{ old('name') }}" placeholder="e.g. Release Pilot"></label>
         <label>Project<select name="project_id" required><option value="">Select a project</option>@foreach($projects as $project)<option value="{{ $project->id }}" @selected(old('project_id', $activeProject?->id) == $project->id)>{{ $project->name }}</option>@endforeach</select></label>
         <label>Goal<textarea name="goal" required rows="5" placeholder="Describe the outcome, constraints, and quality checks...">{{ old('goal') }}</textarea></label>
         <div class="modal-actions"><button type="button" class="secondary-button" data-close-modal>Cancel</button><button class="primary-button" @disabled(!$daemonOnline || $projects->isEmpty())><span>＋</span> Start agent</button></div>

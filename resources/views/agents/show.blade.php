@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>{{ $agent['sessionName'] ?? 'Agent chat' }} — Prime Agent</title>
+    <title>{{ Str::limit($agent['firstMessage'] ?? 'Agent chat', 72) }} — Prime Agent</title>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="chat-body">
@@ -15,7 +15,7 @@
     $model = $agent['model'] ?? null;
     $modelLabel = is_array($model) ? trim(($model['provider'] ?? '').'/'.($model['id'] ?? ''), '/') : 'Default model';
 @endphp
-<div class="chat-shell" data-chat data-transcript-url="{{ route('agents.transcript', ['sessionId' => $sessionId]) }}" data-message-url="{{ route('agents.messages.store', ['sessionId' => $sessionId]) }}">
+<div class="chat-shell" data-chat data-transcript-url="{{ route('agents.transcript', ['sessionId' => $sessionId]) }}" data-message-url="{{ route('agents.messages.store', ['sessionId' => $sessionId]) }}" data-stop-url="{{ route('agents.destroy', ['sessionId' => $sessionId]) }}">
     <aside class="chat-sidebar" id="sidebar">
         <div class="brand-row">
             <a class="brand" href="{{ route('dashboard') }}"><span class="brand-mark"><i></i><i></i><i></i></span><span>prime<span>agent</span></span></a>
@@ -40,7 +40,7 @@
             <button class="icon-btn menu-btn" data-open-nav aria-label="Open navigation"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
             <div class="chat-agent-mark {{ $status }}">{{ $working ? '↯' : '⌁' }}</div>
             <div class="chat-title">
-                <h1 data-chat-name>{{ $agent['sessionName'] ?? Str::limit($agent['firstMessage'] ?? 'Unnamed agent', 72) }}</h1>
+                <h1>{{ Str::limit($agent['firstMessage'] ?? 'Agent session', 72) }}</h1>
                 <p><span data-chat-status class="status-pill {{ $working ? 'running' : ($archived ? 'paused' : 'idle') }}"><i></i>{{ $status }}</span><span>{{ $modelLabel }}</span><code>{{ substr($agent['activeSessionId'] ?? $agent['id'] ?? '', -8) }}</code></p>
             </div>
             <div class="chat-project"><small>Working directory</small><code>{{ $agent['cwd'] ?? 'Unknown project' }}</code></div>
@@ -59,7 +59,8 @@
             </div>
             <form class="chat-composer" data-chat-composer>
                 <textarea name="message" rows="1" maxlength="16384" placeholder="Send a message to this agent…" aria-label="Message the agent" required data-chat-input></textarea>
-                <button class="composer-send" aria-label="Send message"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button>
+                <button class="composer-send" aria-label="Send message" data-composer-send><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button>
+                <button type="button" class="composer-stop" aria-label="Stop agent" title="Stop agent" data-composer-stop hidden><span>■</span></button>
             </form>
             <div class="composer-meta"><span data-chat-feedback>Enter to send · Shift+Enter for a new line</span><span><b data-chat-count>{{ $agent['messageCount'] ?? 0 }}</b> messages</span></div>
         </footer>
