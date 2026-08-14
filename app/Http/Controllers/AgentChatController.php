@@ -22,6 +22,7 @@ class AgentChatController extends Controller
     {
         $agent = $this->resolveAgent($sessionId);
         $transcript = $this->transcripts->read($agent);
+        $agent = $this->transcripts->withDisplayTitle($agent, $transcript);
 
         return view('agents.show', [
             'agent' => $agent,
@@ -38,6 +39,7 @@ class AgentChatController extends Controller
     {
         $agent = $this->resolveAgent($sessionId);
         $transcript = $this->transcripts->read($agent);
+        $agent = $this->transcripts->withDisplayTitle($agent, $transcript);
         $etag = '"'.$transcript['version'].'"';
 
         if ($request->header('If-None-Match') === $etag) {
@@ -130,6 +132,7 @@ class AgentChatController extends Controller
             'unfinishedActionCount' => $agent['unfinishedActionCount'] ?? 0,
             'taskState' => $agent['taskState'] ?? null,
             'summary' => $agent['summary'] ?? null,
+            'firstMessage' => $agent['firstMessage'] ?? null,
         ];
     }
 }

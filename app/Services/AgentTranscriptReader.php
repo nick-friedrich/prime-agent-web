@@ -9,6 +9,43 @@ class AgentTranscriptReader
     private const TOOL_OUTPUT_LIMIT = 32768;
 
     /**
+     * Replace unreliable runtime placeholders with the first real user message.
+     *
+     * @param  array<string, mixed>  $agent
+     * @param  array{items?: mixed}  $transcript
+     * @return array<string, mixed>
+     */
+    public function withDisplayTitle(array $agent, array $transcript): array
+    {
+        $runtimeTitle = is_string($agent['firstMessage'] ?? null) ? trim($agent['firstMessage']) : '';
+        if ($runtimeTitle !== '' && ! in_array(strtolower($runtimeTitle), ['(no messages)', 'no messages'], true)) {
+            return $agent;
+        }
+
+        $items = $transcript['items'] ?? [];
+        if (! is_array($items)) {
+            return $agent;
+        }
+
+        foreach ($items as $item) {
+            if (! is_array($item) || ($item['type'] ?? null) !== 'message' || ($item['role'] ?? null) !== 'user') {
+                continue;
+            }
+
+            $text = $item['text'] ?? null;
+            if (is_string($text) && trim($text) !== '') {
+                $agent['firstMessage'] = trim($text);
+
+                return $agent;
+            }
+        }
+
+        unset($agent['firstMessage']);
+
+        return $agent;
+    }
+
+    /**
      * @param  array<string, mixed>  $agent
      * @return array{available: bool, items: list<array<string, mixed>>, currentActivity: array<string, mixed>, version: string, error: string|null}
      */

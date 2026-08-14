@@ -134,7 +134,8 @@
     <form method="POST" action="{{ route('agents.store') }}">@csrf
         <div class="modal-heading"><div><span class="modal-icon agent">↯</span><div><h2>Start a Prime Agent</h2><p>This creates a real daemon-backed session.</p></div></div><button type="button" data-close-modal>×</button></div>
         <label>Project<select name="project_id" required><option value="">Select a project</option>@foreach($projects as $project)<option value="{{ $project->id }}" @selected(old('project_id', $activeProject?->id) == $project->id)>{{ $project->name }}</option>@endforeach</select></label>
-        <label>Goal<textarea name="goal" required rows="5" placeholder="Describe the outcome, constraints, and quality checks...">{{ old('goal') }}</textarea></label>
+        <label>Session type<select name="session_mode" required><option value="chat" @selected(old('session_mode', 'chat') === 'chat')>Chat — respond to each message</option><option value="goal" @selected(old('session_mode') === 'goal')>Goal — persist until the objective is complete</option></select></label>
+        <label>First instruction<textarea name="goal" required rows="5" placeholder="Describe what you want the agent to do...">{{ old('goal') }}</textarea></label>
         <div class="modal-actions"><button type="button" class="secondary-button" data-close-modal>Cancel</button><button class="primary-button" @disabled(!$daemonOnline || $projects->isEmpty())><span>＋</span> Start agent</button></div>
     </form>
 </dialog>

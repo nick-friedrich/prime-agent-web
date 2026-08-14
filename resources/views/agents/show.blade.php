@@ -40,7 +40,7 @@
             <button class="icon-btn menu-btn" data-open-nav aria-label="Open navigation"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
             <div class="chat-agent-mark {{ $status }}">{{ $working ? '↯' : '⌁' }}</div>
             <div class="chat-title">
-                <h1>{{ Str::limit($agent['firstMessage'] ?? 'Agent session', 72) }}</h1>
+                <h1 data-chat-title>{{ Str::limit($agent['firstMessage'] ?? 'Agent session', 72) }}</h1>
                 <p><span data-chat-status class="status-pill {{ $working ? 'running' : ($archived ? 'paused' : 'idle') }}"><i></i>{{ $status }}</span><span>{{ $modelLabel }}</span><code>{{ substr($agent['activeSessionId'] ?? $agent['id'] ?? '', -8) }}</code></p>
             </div>
             <div class="chat-project"><small>Working directory</small><code>{{ $agent['cwd'] ?? 'Unknown project' }}</code></div>

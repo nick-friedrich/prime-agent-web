@@ -103,18 +103,24 @@ class PrimeAgentRuntime
     }
 
     /** @return array<string, mixed> */
-    public function create(string $cwd, string $goal): array
+    public function create(string $cwd, string $prompt, string $sessionMode = 'chat'): array
     {
         if ($this->binary() === null) {
             throw new \RuntimeException('Prime Agent is not installed.');
         }
 
+        if (! in_array($sessionMode, ['chat', 'goal'], true)) {
+            throw new \InvalidArgumentException('Unsupported Prime Agent session mode.');
+        }
+
+        $config = ['cwd' => $cwd];
+        if ($sessionMode === 'goal') {
+            $config['initialGoal'] = ['objective' => $prompt];
+        }
+
         $agent = $this->daemonRequest([
             'type' => 'create',
-            'config' => [
-                'cwd' => $cwd,
-                'initialGoal' => ['objective' => $goal],
-            ],
+            'config' => $config,
             'lifecycle' => 'resident',
         ]);
         $activeSessionId = $agent['activeSessionId'] ?? null;
@@ -123,7 +129,7 @@ class PrimeAgentRuntime
         }
 
         try {
-            $this->send($activeSessionId, $goal);
+            $this->send($activeSessionId, $prompt);
         } catch (\RuntimeException $error) {
             $this->run(['stop', $activeSessionId, '--json']);
 

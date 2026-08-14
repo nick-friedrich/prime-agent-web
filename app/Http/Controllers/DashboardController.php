@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Project;
+use App\Services\AgentTranscriptReader;
 use App\Services\PrimeAgentRuntime;
 use App\Services\ProjectDiscovery;
 use Illuminate\Http\RedirectResponse;
@@ -16,6 +17,7 @@ class DashboardController extends Controller
     public function __construct(
         private readonly PrimeAgentRuntime $runtime,
         private readonly ProjectDiscovery $projectDiscovery,
+        private readonly AgentTranscriptReader $transcripts,
     ) {}
 
     public function index(Request $request): View
@@ -32,7 +34,9 @@ class DashboardController extends Controller
         $activeProject = $request->filled('project')
             ? $projects->firstWhere('slug', $request->string('project'))
             : null;
-        $agents = collect($agentList);
+        $agents = collect($agentList)->map(function (array $agent): array {
+            return $this->transcripts->withDisplayTitle($agent, $this->transcripts->read($agent));
+        });
 
         if ($activeProject) {
             $agents = $agents->filter(function (array $agent) use ($activeProject): bool {
@@ -89,6 +93,7 @@ class DashboardController extends Controller
         $request->validate([
             'project_id' => ['required', 'exists:projects,id'],
             'goal' => ['required', 'string', 'max:800'],
+            'session_mode' => ['required', 'in:chat,goal'],
         ]);
 
         if (! $this->runtime->isAvailable()) {
@@ -102,9 +107,10 @@ class DashboardController extends Controller
 
         $project = Project::query()->findOrFail($request->integer('project_id'));
         $goal = $request->string('goal')->toString();
+        $sessionMode = $request->string('session_mode')->toString();
 
         try {
-            $this->runtime->create($project->path, $goal);
+            $this->runtime->create($project->path, $goal, $sessionMode);
         } catch (\RuntimeException $error) {
             return back()->withInput()->withErrors(['prime_agent' => $error->getMessage()]);
         }

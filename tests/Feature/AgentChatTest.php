@@ -36,7 +36,7 @@ class AgentChatTest extends TestCase
     public function test_chat_page_and_transcript_endpoint_use_the_resolved_session_file(): void
     {
         $path = $this->transcript();
-        $agent = ['id' => 'saved-1', 'activeSessionId' => 'active-1', 'firstMessage' => 'Hello agent', 'cwd' => base_path(), 'sessionFile' => $path, 'messageCount' => 1, 'activity' => 'idle'];
+        $agent = ['id' => 'saved-1', 'activeSessionId' => 'active-1', 'firstMessage' => '(no messages)', 'cwd' => base_path(), 'sessionFile' => $path, 'messageCount' => 1, 'activity' => 'idle'];
         $runtime = $this->mockRuntime([$agent], 3);
         $runtime->shouldReceive('binary')->andReturn('/usr/local/bin/prime-agent');
 
@@ -44,12 +44,14 @@ class AgentChatTest extends TestCase
             $this->get('/agents/saved-1')
                 ->assertOk()
                 ->assertSee('Hello agent')
+                ->assertDontSee('(no messages)')
                 ->assertSee('Stop agent')
                 ->assertSee('Send a message to this agent');
 
             $response = $this->getJson('/agents/saved-1/transcript')
                 ->assertOk()
                 ->assertJsonPath('transcript.items.0.text', 'Hello agent')
+                ->assertJsonPath('agent.firstMessage', 'Hello agent')
                 ->assertJsonPath('transcript.currentActivity.label', 'Ready for input')
                 ->assertJsonMissingPath('agent.streamingMessage');
             $etag = $response->headers->get('ETag');
@@ -160,13 +162,14 @@ class AgentChatTest extends TestCase
         $runtime = Mockery::mock(PrimeAgentRuntime::class);
         $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
         $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
-        $runtime->shouldReceive('create')->once()->with(base_path(), 'Review the application.')
+        $runtime->shouldReceive('create')->once()->with(base_path(), 'Review the application.', 'chat')
             ->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
         $this->app->instance(PrimeAgentRuntime::class, $runtime);
 
         $this->post(route('agents.store'), [
             'project_id' => $project->id,
             'goal' => 'Review the application.',
+            'session_mode' => 'chat',
         ])->assertSessionHasNoErrors()
             ->assertSessionHas('success', 'The agent was started in Prime Agent.');
     }

@@ -323,6 +323,12 @@ if (chatRoot) {
             $('p', emptyNode).textContent = payload.transcript.error || 'Prime Agent has not written this transcript yet.';
         }
         const agent = payload.agent || {};
+        const title = $('[data-chat-title]', chatRoot);
+        if (title && agent.firstMessage) {
+            const displayTitle = agent.firstMessage.length > 72 ? `${agent.firstMessage.slice(0, 69)}...` : agent.firstMessage;
+            title.textContent = displayTitle;
+            document.title = `${displayTitle} — Prime Agent`;
+        }
         if (count) count.textContent = agent.messageCount ?? items.filter(item => item.type === 'message').length;
         const canStop = agent.activity === 'working' && Boolean(agent.activeSessionId);
         sendButton.hidden = canStop;
