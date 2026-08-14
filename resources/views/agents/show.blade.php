@@ -15,7 +15,7 @@
     $model = $agent['model'] ?? null;
     $modelLabel = is_array($model) ? trim(($model['provider'] ?? '').'/'.($model['id'] ?? ''), '/') : 'Default model';
 @endphp
-<div class="chat-shell" data-chat data-transcript-url="{{ route('agents.transcript', ['sessionId' => $sessionId]) }}" data-message-url="{{ route('agents.messages.store', ['sessionId' => $sessionId]) }}" data-stop-url="{{ route('agents.destroy', ['sessionId' => $sessionId]) }}">
+<div class="chat-shell" data-chat data-transcript-url="{{ route('agents.transcript', ['sessionId' => $sessionId]) }}" data-message-url="{{ route('agents.messages.store', ['sessionId' => $sessionId]) }}" data-attachment-url="{{ route('agents.attachments.show', ['sessionId' => $sessionId, 'attachmentId' => '__ATTACHMENT__']) }}" data-stop-url="{{ route('agents.destroy', ['sessionId' => $sessionId]) }}">
     <aside class="chat-sidebar" id="sidebar">
         <div class="brand-row">
             <a class="brand" href="{{ route('dashboard') }}"><span class="brand-mark"><i></i><i></i><i></i></span><span>prime<span>agent</span></span></a>
@@ -57,10 +57,14 @@
                 <strong data-current-activity-label>Ready for input</strong>
                 <span data-current-activity-detail></span>
             </div>
-            <form class="chat-composer" data-chat-composer>
-                <textarea name="message" rows="1" maxlength="16384" placeholder="Send a message to this agent…" aria-label="Message the agent" required data-chat-input></textarea>
+            <form class="chat-composer" data-chat-composer enctype="multipart/form-data">
+                <div class="composer-attachments" data-composer-attachments hidden></div>
+                <input id="chat-attachments" type="file" name="attachments[]" multiple hidden data-chat-files>
+                <button type="button" class="composer-attach" aria-label="Attach images or files" title="Attach images or files" aria-controls="chat-attachments" data-composer-attach><svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 1 1-2.8-2.8l8.9-8.9"/></svg></button>
+                <textarea name="message" rows="1" maxlength="16384" placeholder="Send a message to this agent…" aria-label="Message the agent" data-chat-input></textarea>
                 <button class="composer-send" aria-label="Send message" data-composer-send><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button>
                 <button type="button" class="composer-stop" aria-label="Stop agent" title="Stop agent" data-composer-stop hidden><span>■</span></button>
+                <div class="composer-drop-overlay" data-composer-drop-overlay hidden>Drop files to attach</div>
             </form>
             <div class="composer-meta"><span data-chat-feedback>Enter to send · Shift+Enter for a new line</span><span><b data-chat-count>{{ $agent['messageCount'] ?? 0 }}</b> messages</span></div>
         </footer>

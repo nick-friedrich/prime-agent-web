@@ -9,7 +9,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class AgentChatController extends Controller
 {
@@ -55,20 +60,62 @@ class AgentChatController extends Controller
     public function storeMessage(Request $request, string $sessionId): JsonResponse
     {
         $request->validate([
-            'message' => ['required', 'string', 'max:16384'],
+            'message' => ['nullable', 'string', 'max:16384'],
+            'attachments' => ['nullable', 'array', 'max:5'],
+            'attachments.*' => ['file', 'max:10240'],
         ]);
+
         $message = $request->string('message')->trim()->toString();
+        $files = array_values(array_filter(
+            $request->file('attachments', []),
+            fn (UploadedFile $file): bool => $file->isValid(),
+        ));
+        if ($message === '' && $files === []) {
+            throw ValidationException::withMessages(['message' => 'Enter a message or attach at least one file.']);
+        }
+
         $agent = $this->resolveAgent($sessionId);
         $target = $agent['activeSessionId'] ?? $agent['id'] ?? null;
         abort_unless(is_string($target) && $target !== '', 404);
 
+        $images = [];
+        if ($files !== []) {
+            $stableSessionId = is_string($agent['id'] ?? null) ? $agent['id'] : $sessionId;
+            [$attachmentPrompt, $images] = $this->storeAttachments($stableSessionId, $files);
+            $message = trim($message."\n\n".$attachmentPrompt);
+        }
+
         try {
-            $receipt = $this->runtime->send($target, $message);
+            $activeSessionId = $agent['activeSessionId'] ?? null;
+            $receipt = $files !== [] && is_string($activeSessionId) && $activeSessionId !== ''
+                ? $this->runtime->prompt($activeSessionId, $message, $images)
+                : $this->runtime->send($target, $message);
         } catch (\RuntimeException $error) {
             return response()->json(['message' => $error->getMessage()], 503);
         }
 
         return response()->json(['receipt' => $receipt], 202);
+    }
+
+    public function attachment(Request $request, string $sessionId, string $attachmentId): BinaryFileResponse
+    {
+        $agent = $this->resolveAgent($sessionId);
+        abort_unless(Str::isUuid($attachmentId), 404);
+
+        $stableSessionId = is_string($agent['id'] ?? null) ? $agent['id'] : $sessionId;
+        $directory = $this->attachmentDirectory($stableSessionId).'/'.$attachmentId;
+        $files = Storage::disk('local')->files($directory);
+        abort_unless(count($files) === 1, 404);
+
+        $path = Storage::disk('local')->path($files[0]);
+        $mimeType = mime_content_type($path) ?: 'application/octet-stream';
+        $inline = $request->boolean('inline') && in_array($mimeType, $this->supportedImageMimeTypes(), true);
+
+        return response()->file($path, [
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => ($inline ? 'inline' : 'attachment').'; filename*=UTF-8\'\''.rawurlencode(basename($path)),
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     public function destroy(Request $request, string $sessionId): JsonResponse|RedirectResponse
@@ -92,6 +139,72 @@ class AgentChatController extends Controller
         }
 
         return redirect()->route('dashboard')->with('success', 'The agent was stopped. Its session remains available to resume later.');
+    }
+
+    /**
+     * @param  list<UploadedFile>  $files
+     * @return array{string, list<array{type: string, mimeType: string, data: string}>}
+     */
+    private function storeAttachments(string $sessionId, array $files): array
+    {
+        $attachments = [];
+        $images = [];
+
+        foreach ($files as $file) {
+            $id = Str::uuid()->toString();
+            $name = $this->safeAttachmentName($file->getClientOriginalName());
+            $stored = $file->storeAs($this->attachmentDirectory($sessionId).'/'.$id, $name, 'local');
+            if (! is_string($stored)) {
+                throw new \RuntimeException('Could not store the attached file.');
+            }
+
+            $mimeType = $file->getMimeType() ?: 'application/octet-stream';
+            $path = Storage::disk('local')->path($stored);
+            $isImage = in_array($mimeType, $this->supportedImageMimeTypes(), true);
+            $attachments[] = [
+                'id' => $id,
+                'name' => $name,
+                'mimeType' => $mimeType,
+                'size' => $file->getSize(),
+                'image' => $isImage,
+                'path' => $path,
+            ];
+
+            if ($isImage) {
+                $contents = file_get_contents($path);
+                if ($contents === false) {
+                    throw new \RuntimeException('Could not read the attached image.');
+                }
+                $encodedImage = base64_encode($contents);
+                if (strlen($encodedImage) < 4.5 * 1024 * 1024) {
+                    $images[] = ['type' => 'image', 'mimeType' => $mimeType, 'data' => $encodedImage];
+                }
+            }
+        }
+
+        $encoded = json_encode($attachments, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return ['<prime-agent-web-attachments>'.$encoded.'</prime-agent-web-attachments>', $images];
+    }
+
+    private function safeAttachmentName(string $name): string
+    {
+        $name = basename(str_replace('\\', '/', $name));
+        $name = preg_replace('/[^\pL\pN._ -]+/u', '_', $name) ?? '';
+        $name = trim($name, " .\t\n\r\0\x0B");
+
+        return $name !== '' ? Str::limit($name, 180, '') : 'attachment';
+    }
+
+    private function attachmentDirectory(string $sessionId): string
+    {
+        return 'agent-uploads/'.hash('sha256', $sessionId);
+    }
+
+    /** @return list<string> */
+    private function supportedImageMimeTypes(): array
+    {
+        return ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     }
 
     /** @return array<string, mixed> */

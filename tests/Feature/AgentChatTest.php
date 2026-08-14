@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\Project;
 use App\Services\PrimeAgentRuntime;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ViewErrorBag;
 use Mockery;
 use Tests\TestCase;
@@ -111,6 +113,68 @@ class AgentChatTest extends TestCase
         $this->postJson('/agents/saved-1/messages', ['message' => str_repeat('x', 16385)])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('message');
+    }
+
+    public function test_images_and_files_can_be_uploaded_with_or_without_message_text(): void
+    {
+        Storage::fake('local');
+        $runtime = $this->mockRuntime([['id' => 'saved-1', 'activeSessionId' => 'active-1']], 2);
+        $prompt = null;
+        $runtime->shouldReceive('prompt')->once()->with(
+            'active-1',
+            Mockery::on(function (string $message) use (&$prompt): bool {
+                $prompt = $message;
+
+                return str_contains($message, '<prime-agent-web-attachments>');
+            }),
+            Mockery::on(fn (array $images): bool => count($images) === 1
+                && ($images[0]['type'] ?? null) === 'image'
+                && ($images[0]['mimeType'] ?? null) === 'image/png'
+                && is_string($images[0]['data'] ?? null)),
+        )->andReturn(['deliveryStatus' => 'accepted']);
+
+        $this->post(route('agents.messages.store', ['sessionId' => 'saved-1']), [
+            'message' => '',
+            'attachments' => [
+                UploadedFile::fake()->image('diagram.png', 30, 20),
+                UploadedFile::fake()->createWithContent('notes.txt', 'Important notes'),
+            ],
+        ], ['Accept' => 'application/json'])
+            ->assertStatus(202)
+            ->assertJsonPath('receipt.deliveryStatus', 'accepted');
+
+        $this->assertIsString($prompt);
+        preg_match('/<prime-agent-web-attachments>(.*?)<\/prime-agent-web-attachments>/s', $prompt, $match);
+        $attachments = json_decode($match[1] ?? '', true);
+        $this->assertIsArray($attachments);
+        $this->assertCount(2, $attachments);
+        $this->assertSame('diagram.png', $attachments[0]['name']);
+        $this->assertTrue($attachments[0]['image']);
+        $this->assertSame('notes.txt', $attachments[1]['name']);
+        $this->assertFalse($attachments[1]['image']);
+        $this->assertFileExists($attachments[1]['path']);
+
+        $download = $this->get(route('agents.attachments.show', [
+            'sessionId' => 'saved-1',
+            'attachmentId' => $attachments[1]['id'],
+        ]))->assertOk()
+            ->assertHeader('Content-Disposition', "attachment; filename*=UTF-8''notes.txt");
+        $this->assertSame('Important notes', file_get_contents($download->baseResponse->getFile()->getPathname()));
+    }
+
+    public function test_a_message_requires_text_or_an_attachment_and_limits_attachment_count(): void
+    {
+        $this->postJson('/agents/saved-1/messages', ['message' => '   '])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('message');
+
+        $files = array_map(
+            fn (int $index): UploadedFile => UploadedFile::fake()->create("file-{$index}.txt", 1),
+            range(1, 6),
+        );
+        $this->post('/agents/saved-1/messages', ['attachments' => $files], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('attachments');
     }
 
     public function test_saved_session_id_is_used_when_no_active_id_exists_and_runtime_failures_are_reported(): void

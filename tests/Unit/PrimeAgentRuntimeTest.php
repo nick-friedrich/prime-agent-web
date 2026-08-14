@@ -68,6 +68,40 @@ class PrimeAgentRuntimeTest extends TestCase
         ], $runtime->messages);
     }
 
+    public function test_prompt_sends_images_through_the_daemon_and_queues_if_busy(): void
+    {
+        $runtime = new class extends PrimeAgentRuntime
+        {
+            /** @var list<array<string, mixed>> */
+            public array $commands = [];
+
+            /** @param array<string, mixed> $command
+             * @return array<string, mixed>
+             */
+            protected function daemonRequest(array $command): array
+            {
+                $this->commands[] = $command;
+
+                return [];
+            }
+        };
+
+        $receipt = $runtime->prompt('active-1', 'Review this image.', [[
+            'type' => 'image', 'mimeType' => 'image/png', 'data' => 'aW1hZ2U=',
+        ]]);
+
+        $this->assertSame(['deliveryStatus' => 'accepted'], $receipt);
+        $this->assertSame([[
+            'type' => 'prompt',
+            'activeSessionId' => 'active-1',
+            'message' => 'Review this image.',
+            'streamingBehavior' => 'followUp',
+            'queueIfBusy' => true,
+            'source' => 'rpc',
+            'images' => [['type' => 'image', 'mimeType' => 'image/png', 'data' => 'aW1hZ2U=']],
+        ]], $runtime->commands);
+    }
+
     public function test_creating_a_chat_session_does_not_seed_a_persistent_goal(): void
     {
         $runtime = new class extends PrimeAgentRuntime

@@ -218,9 +218,15 @@ if (chatRoot) {
     const currentActivity = $('[data-current-activity]', chatRoot);
     const sendButton = $('[data-composer-send]', chatRoot);
     const stopButton = $('[data-composer-stop]', chatRoot);
+    const attachButton = $('[data-composer-attach]', chatRoot);
+    const fileInput = $('[data-chat-files]', chatRoot);
+    const attachmentPreview = $('[data-composer-attachments]', chatRoot);
+    const dropOverlay = $('[data-composer-drop-overlay]', chatRoot);
     const initialNode = $('[data-chat-initial]');
     let etag = null;
     let polling = false;
+    let pendingFiles = [];
+    let dragDepth = 0;
 
     const atBottom = () => scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight < 90;
     const formatTime = value => {
@@ -241,6 +247,48 @@ if (chatRoot) {
     const formatDuration = milliseconds => {
         if (milliseconds === null || milliseconds === undefined) return '';
         return milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 1 : 0)}s`;
+    };
+    const formatBytes = bytes => {
+        if (!Number.isFinite(bytes)) return '';
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10240 ? 1 : 0)} KB`;
+        return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+    };
+    const attachmentUrl = id => chatRoot.dataset.attachmentUrl.replace('__ATTACHMENT__', encodeURIComponent(id));
+    const renderAttachments = attachments => {
+        if (!attachments?.length) return null;
+        const list = document.createElement('div');
+        list.className = 'message-attachments';
+        attachments.forEach(attachment => {
+            const url = attachmentUrl(attachment.id);
+            const link = document.createElement('a');
+            link.className = `message-attachment ${attachment.image ? 'image' : 'file'}`;
+            link.href = attachment.image ? `${url}?inline=1` : url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            if (!attachment.image) link.download = attachment.name || 'attachment';
+            if (attachment.image) {
+                const image = document.createElement('img');
+                const label = document.createElement('span');
+                image.src = `${url}?inline=1`;
+                image.alt = attachment.name || 'Attached image';
+                image.loading = 'lazy';
+                label.textContent = attachment.name || 'Image';
+                link.append(image, label);
+            } else {
+                const icon = document.createElement('span');
+                const details = document.createElement('span');
+                const name = document.createElement('strong');
+                const meta = document.createElement('small');
+                icon.textContent = 'FILE';
+                name.textContent = attachment.name || 'Attachment';
+                meta.textContent = [attachment.mimeType, formatBytes(attachment.size)].filter(Boolean).join(' · ');
+                details.append(name, meta);
+                link.append(icon, details);
+            }
+            list.append(link);
+        });
+        return list;
     };
     const activityDetails = item => {
         const values = [];
@@ -307,7 +355,11 @@ if (chatRoot) {
         meta.append(author, time);
         const content = document.createElement('div');
         content.className = 'message-content';
-        content.innerHTML = item.html || '';
+        const attachments = renderAttachments(item.attachments);
+        if (attachments) content.append(attachments);
+        const text = document.createElement('div');
+        text.innerHTML = item.html || '';
+        content.append(text);
         article.append(meta, content);
         return article;
     };
@@ -374,6 +426,106 @@ if (chatRoot) {
     setInterval(poll, 2000);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
+    let previewObjectUrls = [];
+    const clearPreviewUrls = () => {
+        previewObjectUrls.forEach(url => URL.revokeObjectURL(url));
+        previewObjectUrls = [];
+    };
+    const renderPendingFiles = () => {
+        clearPreviewUrls();
+        attachmentPreview.replaceChildren();
+        attachmentPreview.hidden = pendingFiles.length === 0;
+        pendingFiles.forEach((file, index) => {
+            const item = document.createElement('div');
+            item.className = 'composer-file';
+            const preview = document.createElement('span');
+            preview.className = 'composer-file-preview';
+            if (/^image\/(?:jpeg|png|gif|webp)$/.test(file.type)) {
+                const image = document.createElement('img');
+                const url = URL.createObjectURL(file);
+                previewObjectUrls.push(url);
+                image.src = url;
+                image.alt = '';
+                preview.append(image);
+            } else {
+                preview.textContent = (file.name.split('.').pop() || 'FILE').slice(0, 5).toUpperCase();
+            }
+            const details = document.createElement('span');
+            details.className = 'composer-file-details';
+            const name = document.createElement('strong');
+            const size = document.createElement('small');
+            name.textContent = file.name;
+            size.textContent = formatBytes(file.size);
+            details.append(name, size);
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'composer-file-remove';
+            remove.setAttribute('aria-label', `Remove ${file.name}`);
+            remove.textContent = '×';
+            remove.addEventListener('click', () => {
+                pendingFiles.splice(index, 1);
+                renderPendingFiles();
+            });
+            item.append(preview, details, remove);
+            attachmentPreview.append(item);
+        });
+    };
+    const addFiles = files => {
+        const rejected = [];
+        [...files].forEach(file => {
+            const duplicate = pendingFiles.some(item => item.name === file.name && item.size === file.size && item.lastModified === file.lastModified);
+            if (duplicate) return;
+            if (pendingFiles.length >= 5) return rejected.push('You can attach up to 5 files.');
+            if (file.size > 10 * 1024 * 1024) return rejected.push(`${file.name} is larger than 10 MB.`);
+            pendingFiles.push(file);
+        });
+        renderPendingFiles();
+        if (rejected.length) {
+            feedback.textContent = rejected[0];
+            feedback.classList.add('error');
+        } else if (pendingFiles.length) {
+            feedback.classList.remove('error', 'success');
+            feedback.textContent = `${pendingFiles.length} ${pendingFiles.length === 1 ? 'file' : 'files'} ready to send.`;
+        }
+    };
+    const setDragging = dragging => {
+        composer.classList.toggle('is-dragging', dragging);
+        dropOverlay.hidden = !dragging;
+    };
+
+    attachButton.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        addFiles(fileInput.files || []);
+        fileInput.value = '';
+    });
+    composer.addEventListener('dragenter', event => {
+        if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
+        event.preventDefault();
+        dragDepth += 1;
+        setDragging(true);
+    });
+    composer.addEventListener('dragover', event => {
+        if (![...(event.dataTransfer?.types || [])].includes('Files')) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    });
+    composer.addEventListener('dragleave', event => {
+        event.preventDefault();
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) setDragging(false);
+    });
+    composer.addEventListener('drop', event => {
+        event.preventDefault();
+        dragDepth = 0;
+        setDragging(false);
+        if (event.dataTransfer?.files) addFiles(event.dataTransfer.files);
+    });
+    input.addEventListener('paste', event => {
+        const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean);
+        if (files.length) addFiles(files);
+    });
+    window.addEventListener('beforeunload', clearPreviewUrls);
+
     const resizeInput = () => {
         input.style.height = 'auto';
         input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
@@ -388,27 +540,33 @@ if (chatRoot) {
     composer.addEventListener('submit', async event => {
         event.preventDefault();
         const message = input.value.trim();
-        if (!message) return;
+        if (!message && pendingFiles.length === 0) return;
         sendButton.disabled = true;
+        attachButton.disabled = true;
         input.disabled = true;
+        $$('button', attachmentPreview).forEach(button => { button.disabled = true; });
         feedback.classList.remove('error', 'success');
-        feedback.textContent = 'Sending…';
+        feedback.textContent = pendingFiles.length ? 'Uploading and sending…' : 'Sending…';
+        const formData = new FormData();
+        formData.append('message', message);
+        pendingFiles.forEach(file => formData.append('attachments[]', file, file.name));
         try {
             const response = await fetch(chatRoot.dataset.messageUrl, {
                 method: 'POST',
                 headers: {
                     Accept: 'application/json',
-                    'Content-Type': 'application/json',
                     'X-CSRF-TOKEN': $('meta[name="csrf-token"]').content,
                 },
-                body: JSON.stringify({ message }),
+                body: formData,
             });
             const body = await response.json();
             if (!response.ok) {
-                const validation = body.errors?.message?.[0];
+                const validation = Object.values(body.errors || {}).flat()[0];
                 throw new Error(validation || body.message || 'Prime Agent did not accept the message.');
             }
             input.value = '';
+            pendingFiles = [];
+            renderPendingFiles();
             resizeInput();
             const delivery = body.receipt?.deliveryStatus === 'queued' ? 'Queued for the agent.' : 'Delivered to the agent.';
             feedback.textContent = delivery;
@@ -420,7 +578,9 @@ if (chatRoot) {
             feedback.classList.add('error');
         } finally {
             sendButton.disabled = false;
+            attachButton.disabled = false;
             input.disabled = false;
+            $$('button', attachmentPreview).forEach(button => { button.disabled = false; });
             input.focus();
         }
     });

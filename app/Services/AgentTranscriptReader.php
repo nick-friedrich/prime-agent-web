@@ -18,7 +18,9 @@ class AgentTranscriptReader
     public function withDisplayTitle(array $agent, array $transcript): array
     {
         $runtimeTitle = is_string($agent['firstMessage'] ?? null) ? trim($agent['firstMessage']) : '';
-        if ($runtimeTitle !== '' && ! in_array(strtolower($runtimeTitle), ['(no messages)', 'no messages'], true)) {
+        if ($runtimeTitle !== ''
+            && ! in_array(strtolower($runtimeTitle), ['(no messages)', 'no messages'], true)
+            && ! str_contains($runtimeTitle, '<prime-agent-web-attachments>')) {
             return $agent;
         }
 
@@ -35,6 +37,14 @@ class AgentTranscriptReader
             $text = $item['text'] ?? null;
             if (is_string($text) && trim($text) !== '') {
                 $agent['firstMessage'] = trim($text);
+
+                return $agent;
+            }
+            $attachments = $item['attachments'] ?? null;
+            $firstAttachment = is_array($attachments) ? ($attachments[0] ?? null) : null;
+            $name = is_array($firstAttachment) ? ($firstAttachment['name'] ?? null) : null;
+            if (is_string($name) && $name !== '') {
+                $agent['firstMessage'] = 'Shared '.$name;
 
                 return $agent;
             }
@@ -182,8 +192,9 @@ class AgentTranscriptReader
         $role = $message['role'] ?? null;
         if ($role === 'user') {
             $text = $this->contentText($message['content'] ?? null);
-            if ($text !== '') {
-                $items[] = $this->textItem($id, 'user', $text, $timestamp);
+            [$text, $attachments] = $this->extractAttachments($text);
+            if ($text !== '' || $attachments !== []) {
+                $items[] = $this->textItem($id, 'user', $text, $timestamp, null, $attachments);
             }
             return;
         }
@@ -263,7 +274,8 @@ class AgentTranscriptReader
             $from = is_array($details['from'] ?? null) ? $details['from'] : [];
             $isAgent = isset($from['sessionId']) || isset($from['activeSessionId']) || isset($details['fromRelationship']);
             if (! $isAgent) {
-                $items[] = $this->textItem($id, 'user', trim($text), $timestamp);
+                [$text, $attachments] = $this->extractAttachments(trim($text));
+                $items[] = $this->textItem($id, 'user', $text, $timestamp, null, $attachments);
                 return;
             }
             $sender = $from['sessionName'] ?? $from['name'] ?? $from['activeSessionId'] ?? $from['sessionId'] ?? 'subagent';
@@ -304,10 +316,17 @@ class AgentTranscriptReader
         return Str::limit($recap !== '' ? $recap : 'Thinking', 140);
     }
 
-    /** @return array<string, mixed> */
-    private function textItem(string $id, string $role, string $text, ?string $timestamp, ?string $label = null): array
+    /**
+     * @param  list<array<string, mixed>>  $attachments
+     * @return array<string, mixed>
+     */
+    private function textItem(string $id, string $role, string $text, ?string $timestamp, ?string $label = null, array $attachments = []): array
     {
-        return ['id' => $id, 'type' => 'message', 'role' => $role, 'text' => $text, 'html' => $this->markdown($text), 'label' => $label, 'timestamp' => $timestamp];
+        return [
+            'id' => $id, 'type' => 'message', 'role' => $role, 'text' => $text,
+            'html' => $this->markdown($text), 'label' => $label, 'timestamp' => $timestamp,
+            'attachments' => $attachments,
+        ];
     }
 
     /**
@@ -525,6 +544,41 @@ class AgentTranscriptReader
         }
 
         return trim(implode("\n", $parts));
+    }
+
+    /** @return array{string, list<array<string, mixed>>} */
+    private function extractAttachments(string $text): array
+    {
+        $attachments = [];
+        $pattern = '/\s*<prime-agent-web-attachments>(.*?)<\/prime-agent-web-attachments>\s*/s';
+        if (preg_match($pattern, $text, $match) === 1) {
+            $decoded = json_decode($match[1], true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $attachment) {
+                    if (! is_array($attachment)
+                        || ! is_string($attachment['id'] ?? null)
+                        || ! Str::isUuid($attachment['id'])
+                        || ! is_string($attachment['name'] ?? null)) {
+                        continue;
+                    }
+                    $mimeType = is_string($attachment['mimeType'] ?? null) ? $attachment['mimeType'] : 'application/octet-stream';
+                    $size = is_int($attachment['size'] ?? null) ? $attachment['size'] : null;
+                    $attachments[] = [
+                        'id' => $attachment['id'],
+                        'name' => $attachment['name'],
+                        'mimeType' => $mimeType,
+                        'size' => $size,
+                        'image' => ($attachment['image'] ?? false) === true,
+                    ];
+                }
+            }
+            $text = preg_replace($pattern, "\n", $text, 1) ?? $text;
+        }
+        if ($attachments !== []) {
+            $text = preg_replace('/(?:^|\n)\[Image attachment\](?=\n|$)/', '', $text) ?? $text;
+        }
+
+        return [trim($text), $attachments];
     }
 
     private function markdown(string $value): string

@@ -139,6 +139,29 @@ class PrimeAgentRuntime
         return $agent;
     }
 
+    /**
+     * @param  list<array{type: string, mimeType: string, data: string}>  $images
+     * @return array<string, mixed>
+     */
+    public function prompt(string $activeSessionId, string $message, array $images = []): array
+    {
+        $command = [
+            'type' => 'prompt',
+            'activeSessionId' => $activeSessionId,
+            'message' => $message,
+            'streamingBehavior' => 'followUp',
+            'queueIfBusy' => true,
+            'source' => 'rpc',
+        ];
+        if ($images !== []) {
+            $command['images'] = $images;
+        }
+
+        $this->daemonRequest($command);
+
+        return ['deliveryStatus' => 'accepted'];
+    }
+
     /** @return array<string, mixed> */
     public function send(string $sessionId, string $message): array
     {
@@ -242,7 +265,7 @@ class PrimeAgentRuntime
                 throw new \RuntimeException(is_string($error) && $error !== '' ? $error : 'Prime Agent rejected the daemon request.');
             }
 
-            $data = $response['data'] ?? null;
+            $data = $response['data'] ?? [];
             if (! is_array($data)) {
                 throw new \RuntimeException('Prime Agent returned an invalid daemon response.');
             }

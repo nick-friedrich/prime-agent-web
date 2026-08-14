@@ -13,4 +13,5 @@ Route::post('/agents', [DashboardController::class, 'storeAgent'])->name('agents
 Route::get('/agents/{sessionId}', [AgentChatController::class, 'show'])->name('agents.show');
 Route::get('/agents/{sessionId}/transcript', [AgentChatController::class, 'transcript'])->name('agents.transcript');
 Route::post('/agents/{sessionId}/messages', [AgentChatController::class, 'storeMessage'])->name('agents.messages.store');
+Route::get('/agents/{sessionId}/attachments/{attachmentId}', [AgentChatController::class, 'attachment'])->name('agents.attachments.show');
 Route::delete('/agents/{sessionId}', [AgentChatController::class, 'destroy'])->name('agents.destroy');

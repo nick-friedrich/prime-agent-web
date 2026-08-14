@@ -49,6 +49,47 @@ class AgentTranscriptReaderTest extends TestCase
         }
     }
 
+    public function test_it_extracts_safe_attachment_metadata_without_returning_paths_or_image_data(): void
+    {
+        $attachmentId = '123e4567-e89b-12d3-a456-426614174000';
+        $metadata = json_encode([[
+            'id' => $attachmentId,
+            'name' => 'diagram.png',
+            'mimeType' => 'image/png',
+            'size' => 1234,
+            'image' => true,
+            'path' => '/private/agent-uploads/diagram.png',
+        ]], JSON_UNESCAPED_SLASHES);
+        $path = $this->transcript([
+            ['type' => 'session', 'id' => 'session-1'],
+            ['type' => 'message', 'id' => 'user', 'parentId' => null, 'message' => ['role' => 'user', 'content' => [
+                ['type' => 'text', 'text' => "Please inspect this.\n\n<prime-agent-web-attachments>{$metadata}</prime-agent-web-attachments>"],
+                ['type' => 'image', 'mimeType' => 'image/png', 'data' => 'very-secret-base64'],
+            ]]],
+        ]);
+
+        try {
+            $reader = new AgentTranscriptReader;
+            $result = $reader->read(['id' => 'session-1', 'sessionFile' => $path]);
+            $item = $result['items'][0];
+
+            $this->assertSame('Please inspect this.', $item['text']);
+            $this->assertSame([[
+                'id' => $attachmentId,
+                'name' => 'diagram.png',
+                'mimeType' => 'image/png',
+                'size' => 1234,
+                'image' => true,
+            ]], $item['attachments']);
+            $this->assertStringNotContainsString('/private/', json_encode($item) ?: '');
+            $this->assertStringNotContainsString('very-secret-base64', json_encode($item) ?: '');
+            $agent = $reader->withDisplayTitle(['firstMessage' => "Please inspect this.\n{$metadata}<prime-agent-web-attachments>"], $result);
+            $this->assertSame('Please inspect this.', $agent['firstMessage']);
+        } finally {
+            File::delete($path);
+        }
+    }
+
     public function test_it_summarizes_thinking_and_ipython_activity_with_structured_details(): void
     {
         $path = $this->transcript([
