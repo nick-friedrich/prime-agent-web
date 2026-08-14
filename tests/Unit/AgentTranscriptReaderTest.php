@@ -29,19 +29,101 @@ class AgentTranscriptReaderTest extends TestCase
             $result = (new AgentTranscriptReader)->read(['id' => 'session-1', 'sessionFile' => $path]);
 
             $this->assertTrue($result['available']);
-            $this->assertCount(5, $result['items']);
-            $this->assertSame(['user', null, 'assistant', 'user', 'system'], array_map(
+            $this->assertCount(6, $result['items']);
+            $this->assertSame(['message', 'thinking', 'message', 'tool', 'message', 'message'], array_column($result['items'], 'type'));
+            $this->assertSame(['user', null, 'assistant', null, 'user', 'system'], array_map(
                 fn (array $item): mixed => $item['role'] ?? null,
                 $result['items']
             ));
             $this->assertStringNotContainsString('<script>', $result['items'][0]['html']);
             $this->assertStringContainsString('<strong>Build it</strong>', $result['items'][0]['html']);
-            $this->assertStringNotContainsString('hidden reasoning', $result['items'][2]['html']);
-            $this->assertSame('shell', $result['items'][1]['name']);
-            $this->assertSame('/tmp', $result['items'][1]['output']);
-            $this->assertSame('Follow up', $result['items'][3]['text']);
-            $this->assertSame('Conversation compacted', $result['items'][4]['label']);
+            $this->assertStringContainsString('hidden reasoning', $result['items'][1]['html']);
+            $this->assertSame('hidden reasoning', $result['items'][1]['summary']);
+            $this->assertSame('shell', $result['items'][3]['name']);
+            $this->assertSame('/tmp', $result['items'][3]['output']);
+            $this->assertSame('Follow up', $result['items'][4]['text']);
+            $this->assertSame('Conversation compacted', $result['items'][5]['label']);
             $this->assertStringNotContainsString('Discarded branch', json_encode($result['items']) ?: '');
+        } finally {
+            File::delete($path);
+        }
+    }
+
+    public function test_it_summarizes_thinking_and_ipython_activity_with_structured_details(): void
+    {
+        $path = $this->transcript([
+            ['type' => 'session', 'id' => 'session-1'],
+            ['type' => 'message', 'id' => 'assistant', 'parentId' => null, 'message' => ['role' => 'assistant', 'content' => [
+                ['type' => 'thinking', 'thinking' => "**Inspecting repository**\nNotes\n\n## Writing the fix"],
+                ['type' => 'toolCall', 'id' => 'call-1', 'name' => 'ipython', 'arguments' => ['code' => "%%bash\nprintf 'hello'\nprintf 'world'"]],
+            ]]],
+            ['type' => 'message', 'id' => 'result', 'parentId' => 'assistant', 'message' => [
+                'role' => 'toolResult', 'toolCallId' => 'call-1', 'content' => [], 'isError' => false,
+                'details' => ['stdout' => "hello\nworld\n", 'durationMs' => 1250, 'diffs' => [['path' => 'app.php']]],
+            ]],
+        ]);
+
+        try {
+            $result = (new AgentTranscriptReader)->read(['id' => 'session-1', 'sessionFile' => $path]);
+            $thinking = $result['items'][0];
+            $tool = $result['items'][1];
+
+            $this->assertSame('Writing the fix', $thinking['summary']);
+            $this->assertSame('bash', $tool['language']);
+            $this->assertSame("printf 'hello'", $tool['preview']);
+            $this->assertSame(3, $tool['inputLines']);
+            $this->assertSame(2, $tool['outputLines']);
+            $this->assertSame(1250, $tool['durationMs']);
+            $this->assertSame('completed', $tool['status']);
+            $this->assertStringContainsString('app.php', $tool['diffs']);
+        } finally {
+            File::delete($path);
+        }
+    }
+
+    public function test_it_classifies_subagent_messages_separately_from_client_input(): void
+    {
+        $path = $this->transcript([
+            ['type' => 'session', 'id' => 'session-1'],
+            ['type' => 'custom_message', 'id' => 'client', 'parentId' => null, 'customType' => 'agent_message', 'details' => ['message' => 'Continue', 'from' => ['clientId' => 'web']]],
+            ['type' => 'custom_message', 'id' => 'child', 'parentId' => 'client', 'customType' => 'agent_message', 'details' => [
+                'message' => 'Repository inspection is complete.', 'fromRelationship' => 'child',
+                'from' => ['sessionId' => 'child-1', 'sessionName' => 'catalog-reviewer'],
+            ]],
+        ]);
+
+        try {
+            $items = (new AgentTranscriptReader)->read(['id' => 'session-1', 'sessionFile' => $path])['items'];
+            $this->assertSame('user', $items[0]['role']);
+            $this->assertSame('agent_message', $items[1]['type']);
+            $this->assertSame('catalog-reviewer', $items[1]['sender']);
+            $this->assertSame('child', $items[1]['relationship']);
+        } finally {
+            File::delete($path);
+        }
+    }
+
+    public function test_it_adds_streaming_activity_and_versions_live_state(): void
+    {
+        $path = $this->transcript([['type' => 'session', 'id' => 'session-1']]);
+        $reader = new AgentTranscriptReader;
+        $base = ['id' => 'session-1', 'sessionFile' => $path, 'activity' => 'working', 'isStreaming' => true];
+        $streaming = ['role' => 'assistant', 'content' => [
+            ['type' => 'thinking', 'thinking' => '**Designing the timeline**'],
+            ['type' => 'toolCall', 'id' => 'live-call', 'name' => 'ipython', 'arguments' => ['code' => 'pathlib.Path.cwd()']],
+        ]];
+
+        try {
+            $first = $reader->read($base + ['streamingMessage' => $streaming]);
+            $second = $reader->read($base + ['isCompacting' => true, 'streamingMessage' => $streaming]);
+
+            $this->assertCount(2, $first['items']);
+            $this->assertTrue($first['items'][0]['current']);
+            $this->assertSame('running', $first['items'][1]['status']);
+            $this->assertSame('thinking', $first['currentActivity']['kind']);
+            $this->assertSame('Designing the timeline', $first['currentActivity']['detail']);
+            $this->assertSame('compacting', $second['currentActivity']['kind']);
+            $this->assertNotSame($first['version'], $second['version']);
         } finally {
             File::delete($path);
         }

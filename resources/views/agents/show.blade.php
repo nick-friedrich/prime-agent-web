@@ -52,6 +52,11 @@
         </section>
 
         <footer class="composer-wrap">
+            <div class="current-activity" data-current-activity role="status">
+                <span class="activity-indicator"><i></i></span>
+                <strong data-current-activity-label>Ready for input</strong>
+                <span data-current-activity-detail></span>
+            </div>
             <form class="chat-composer" data-chat-composer>
                 <textarea name="message" rows="1" maxlength="16384" placeholder="Send a message to this agent…" aria-label="Message the agent" required data-chat-input></textarea>
                 <button class="composer-send" aria-label="Send message"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg></button>
@@ -60,6 +65,6 @@
         </footer>
     </main>
 </div>
-<script type="application/json" data-chat-initial>{{ Illuminate\Support\Js::encode(['agent' => $agent, 'transcript' => $transcript]) }}</script>
+<script type="application/json" data-chat-initial>{{ Illuminate\Support\Js::encode(['agent' => $agentPayload, 'transcript' => $transcript]) }}</script>
 </body>
 </html>

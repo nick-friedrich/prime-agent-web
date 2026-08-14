@@ -45,11 +45,42 @@ class AgentChatTest extends TestCase
 
             $response = $this->getJson('/agents/saved-1/transcript')
                 ->assertOk()
-                ->assertJsonPath('transcript.items.0.text', 'Hello agent');
+                ->assertJsonPath('transcript.items.0.text', 'Hello agent')
+                ->assertJsonPath('transcript.currentActivity.label', 'Ready for input')
+                ->assertJsonMissingPath('agent.streamingMessage');
             $etag = $response->headers->get('ETag');
             $this->assertNotNull($etag);
 
             $this->withHeader('If-None-Match', $etag)->get('/agents/saved-1/transcript')->assertStatus(304);
+        } finally {
+            File::delete($path);
+        }
+    }
+
+    public function test_transcript_etag_changes_when_only_live_agent_state_changes(): void
+    {
+        $path = $this->transcript();
+        $base = ['id' => 'saved-1', 'activeSessionId' => 'active-1', 'sessionFile' => $path, 'activity' => 'working'];
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->twice()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->twice()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('agents')->once()->andReturn([$base + [
+            'isStreaming' => true,
+            'streamingMessage' => ['role' => 'assistant', 'content' => [['type' => 'thinking', 'thinking' => '**Inspecting files**']]],
+        ]]);
+        $runtime->shouldReceive('agents')->once()->andReturn([$base + ['isCompacting' => true]]);
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        try {
+            $first = $this->getJson('/agents/saved-1/transcript')
+                ->assertOk()
+                ->assertJsonPath('transcript.currentActivity.kind', 'thinking');
+            $second = $this->withHeader('If-None-Match', (string) $first->headers->get('ETag'))
+                ->getJson('/agents/saved-1/transcript')
+                ->assertOk()
+                ->assertJsonPath('transcript.currentActivity.kind', 'compacting');
+
+            $this->assertNotSame($first->headers->get('ETag'), $second->headers->get('ETag'));
         } finally {
             File::delete($path);
         }

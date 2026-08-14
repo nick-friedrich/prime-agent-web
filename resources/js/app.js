@@ -215,6 +215,7 @@ if (chatRoot) {
     const input = $('[data-chat-input]', chatRoot);
     const feedback = $('[data-chat-feedback]', chatRoot);
     const count = $('[data-chat-count]', chatRoot);
+    const currentActivity = $('[data-current-activity]', chatRoot);
     const initialNode = $('[data-chat-initial]');
     let etag = null;
     let polling = false;
@@ -235,34 +236,63 @@ if (chatRoot) {
         block.append(heading, pre);
         return block;
     };
-    const renderItem = (item, expanded) => {
-        if (item.type === 'tool') {
-            const details = document.createElement('details');
-            details.className = `tool-activity${item.error ? ' error' : ''}`;
-            details.dataset.entryId = item.id;
-            details.open = expanded.has(item.id);
-            const summary = document.createElement('summary');
-            const icon = document.createElement('span');
-            const title = document.createElement('strong');
-            const hint = document.createElement('small');
-            icon.textContent = item.error ? '!' : '›';
-            title.textContent = item.name || 'Tool activity';
-            hint.textContent = item.error ? 'failed' : (item.output ? 'completed' : 'running');
-            summary.append(icon, title, hint);
-            const body = document.createElement('div');
-            body.className = 'tool-body';
+    const formatDuration = milliseconds => {
+        if (milliseconds === null || milliseconds === undefined) return '';
+        return milliseconds < 1000 ? `${milliseconds}ms` : `${(milliseconds / 1000).toFixed(milliseconds < 10000 ? 1 : 0)}s`;
+    };
+    const activityDetails = item => {
+        const values = [];
+        if (item.inputLines) values.push(`↑ ${item.inputLines}`);
+        if (item.outputLines) values.push(`↓ ${item.outputLines} ${item.outputLines === 1 ? 'line' : 'lines'}`);
+        if (item.durationMs !== null && item.durationMs !== undefined) values.push(formatDuration(item.durationMs));
+        if (item.errorName) values.push(item.errorName);
+        return values.join(' · ');
+    };
+    const activityRow = (item, expanded, kind) => {
+        const details = document.createElement('details');
+        details.className = `timeline-activity ${kind}${item.error ? ' error' : ''}${item.current ? ' current' : ''}`;
+        details.dataset.entryId = item.id;
+        details.open = expanded.has(item.id);
+        const summary = document.createElement('summary');
+        const icon = document.createElement('span');
+        const label = document.createElement('strong');
+        const preview = document.createElement('code');
+        const metrics = document.createElement('small');
+        icon.className = 'timeline-icon';
+        icon.textContent = item.error ? '×' : item.current ? '◆' : kind === 'thinking' ? '◌' : kind === 'agent-message' ? '◆' : '✓';
+        label.textContent = kind === 'thinking' ? 'Thinking' : kind === 'agent-message' ? `Agent message · ${item.sender || 'subagent'}` : (item.language || item.name || 'tool');
+        preview.textContent = kind === 'thinking' ? item.summary : item.preview;
+        metrics.textContent = kind === 'agent-message' ? (item.relationship || 'received') : activityDetails(item);
+        summary.append(icon, label, preview, metrics);
+        const body = document.createElement('div');
+        body.className = 'timeline-body';
+        if (kind === 'thinking' || kind === 'agent-message') {
+            const content = document.createElement('div');
+            content.className = 'message-content';
+            content.innerHTML = item.html || '';
+            body.append(content);
+        } else {
             const argumentsBlock = codeBlock('Input', item.arguments);
             const outputBlock = codeBlock(item.error ? 'Error output' : 'Output', item.output);
+            const diffsBlock = codeBlock('Changes', item.diffs);
             if (argumentsBlock) body.append(argumentsBlock);
             if (outputBlock) body.append(outputBlock);
+            if (diffsBlock) body.append(diffsBlock);
             if (item.truncated) {
                 const notice = document.createElement('p');
                 notice.textContent = 'Output truncated to keep this chat responsive.';
                 body.append(notice);
             }
-            details.append(summary, body);
-            return details;
         }
+        details.append(summary, body);
+        return details;
+    };
+    const renderItem = (item, expanded) => {
+        if (item.type === 'tool') {
+            return activityRow(item, expanded, 'tool');
+        }
+        if (item.type === 'thinking') return activityRow(item, expanded, 'thinking');
+        if (item.type === 'agent_message') return activityRow(item, expanded, 'agent-message');
 
         const article = document.createElement('article');
         article.className = `chat-message ${item.role}`;
@@ -298,6 +328,14 @@ if (chatRoot) {
             const working = agent.activity === 'working';
             status.className = `status-pill ${working ? 'running' : archived ? 'paused' : 'idle'}`;
             status.replaceChildren(document.createElement('i'), document.createTextNode(archived ? 'archived' : working ? 'working' : 'idle'));
+        }
+        const activity = payload.transcript?.currentActivity || {};
+        if (currentActivity) {
+            currentActivity.className = `current-activity ${activity.kind || 'idle'}${activity.active ? ' active' : ''}`;
+            $('[data-current-activity-label]', currentActivity).textContent = activity.label || 'Ready for input';
+            const detail = $('[data-current-activity-detail]', currentActivity);
+            detail.textContent = activity.detail || '';
+            detail.hidden = !activity.detail;
         }
         if (shouldFollow) requestAnimationFrame(() => { scrollNode.scrollTop = scrollNode.scrollHeight; });
     };

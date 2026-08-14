@@ -24,6 +24,7 @@ class AgentChatController extends Controller
 
         return view('agents.show', [
             'agent' => $agent,
+            'agentPayload' => $this->agentMetadata($agent),
             'sessionId' => $sessionId,
             'transcript' => $transcript,
             'projects' => Project::orderBy('name')->get(),
@@ -98,6 +99,14 @@ class AgentChatController extends Controller
             'lifecycle' => $agent['lifecycle'] ?? null,
             'model' => $agent['model'] ?? null,
             'messageCount' => $agent['messageCount'] ?? 0,
+            'isStreaming' => (bool) ($agent['isStreaming'] ?? false),
+            'isRunningTools' => (bool) ($agent['isRunningTools'] ?? false),
+            'isCompacting' => (bool) ($agent['isCompacting'] ?? false),
+            'isBashRunning' => (bool) ($agent['isBashRunning'] ?? false),
+            'hasRunningRlmChildren' => (bool) ($agent['hasRunningRlmChildren'] ?? false),
+            'unfinishedActionCount' => $agent['unfinishedActionCount'] ?? 0,
+            'taskState' => $agent['taskState'] ?? null,
+            'summary' => $agent['summary'] ?? null,
         ];
     }
 }
