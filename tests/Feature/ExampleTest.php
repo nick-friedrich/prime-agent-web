@@ -150,15 +150,17 @@ class ExampleTest extends TestCase
         $runtime = Mockery::mock(PrimeAgentRuntime::class);
         $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
         $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
-        $runtime->shouldReceive('create')->once()->with(base_path(), 'Prepare a safe release.', 'goal')
-            ->andReturn(['activeSessionId' => 'session-1']);
+        $runtime->shouldReceive('createSession')->once()->with(base_path(), 'goal', 'Prepare a safe release.')
+            ->andReturn(['id' => 'saved-1', 'activeSessionId' => 'session-1']);
+        $runtime->shouldReceive('send')->once()->with('session-1', 'Prepare a safe release.')
+            ->andReturn(['deliveryStatus' => 'accepted']);
         $this->app->instance(PrimeAgentRuntime::class, $runtime);
 
         $this->post('/agents', [
             'project_id' => $project->id,
-            'goal' => 'Prepare a safe release.',
+            'message' => 'Prepare a safe release.',
             'session_mode' => 'goal',
-        ])->assertRedirect()->assertSessionHas('success');
+        ])->assertRedirect(route('agents.show', ['sessionId' => 'saved-1']));
     }
 
     public function test_missing_prime_agent_blocks_deployment(): void
@@ -172,7 +174,7 @@ class ExampleTest extends TestCase
 
         $this->post('/agents', [
             'project_id' => $project->id,
-            'goal' => 'Prepare a safe release.',
+            'message' => 'Prepare a safe release.',
             'session_mode' => 'chat',
         ])->assertSessionHasErrors('prime_agent');
     }

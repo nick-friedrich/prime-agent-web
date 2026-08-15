@@ -15,7 +15,7 @@ class PrimeAgentRuntimeTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Prime Agent is not installed.');
 
-            (new PrimeAgentRuntime)->create(base_path(), 'Test the project.', 'goal');
+        (new PrimeAgentRuntime)->create(base_path(), 'Test the project.', 'goal');
     }
 
     public function test_creating_an_agent_uses_a_resident_daemon_session_and_sends_the_goal(): void
@@ -66,6 +66,39 @@ class PrimeAgentRuntimeTest extends TestCase
         $this->assertSame([
             ['sessionId' => 'active-1', 'message' => 'Test the project.'],
         ], $runtime->messages);
+    }
+
+    public function test_allocating_a_chat_session_does_not_send_a_message(): void
+    {
+        $runtime = new class extends PrimeAgentRuntime
+        {
+            /** @var list<array<string, mixed>> */
+            public array $commands = [];
+
+            public function binary(): ?string
+            {
+                return '/usr/local/bin/prime-agent';
+            }
+
+            /** @param array<string, mixed> $command
+             * @return array<string, mixed>
+             */
+            protected function daemonRequest(array $command): array
+            {
+                $this->commands[] = $command;
+
+                return ['id' => 'saved-1', 'activeSessionId' => 'active-1'];
+            }
+        };
+
+        $agent = $runtime->createSession(base_path());
+
+        $this->assertSame('active-1', $agent['activeSessionId']);
+        $this->assertSame([[
+            'type' => 'create',
+            'config' => ['cwd' => base_path()],
+            'lifecycle' => 'resident',
+        ]], $runtime->commands);
     }
 
     public function test_prompt_sends_images_through_the_daemon_and_queues_if_busy(): void

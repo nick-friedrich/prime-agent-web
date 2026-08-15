@@ -87,34 +87,4 @@ class DashboardController extends Controller
 
         return back()->with('success', 'Project connected. You can now start an agent.');
     }
-
-    public function storeAgent(Request $request): RedirectResponse
-    {
-        $request->validate([
-            'project_id' => ['required', 'exists:projects,id'],
-            'goal' => ['required', 'string', 'max:800'],
-            'session_mode' => ['required', 'in:chat,goal'],
-        ]);
-
-        if (! $this->runtime->isAvailable()) {
-            return back()->withErrors(['prime_agent' => 'Prime Agent is not installed or is not visible to Laravel.']);
-        }
-
-        $daemon = $this->runtime->ensureDaemon();
-        if (! $daemon['online']) {
-            return back()->withErrors(['prime_agent' => $daemon['error'] ?: 'Prime Agent could not start.']);
-        }
-
-        $project = Project::query()->findOrFail($request->integer('project_id'));
-        $goal = $request->string('goal')->toString();
-        $sessionMode = $request->string('session_mode')->toString();
-
-        try {
-            $this->runtime->create($project->path, $goal, $sessionMode);
-        } catch (\RuntimeException $error) {
-            return back()->withInput()->withErrors(['prime_agent' => $error->getMessage()]);
-        }
-
-        return back()->with('success', 'The agent was started in Prime Agent.');
-    }
 }

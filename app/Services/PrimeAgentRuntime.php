@@ -105,17 +105,36 @@ class PrimeAgentRuntime
     /** @return array<string, mixed> */
     public function create(string $cwd, string $prompt, string $sessionMode = 'chat'): array
     {
+        $agent = $this->createSession($cwd, $sessionMode, $sessionMode === 'goal' ? $prompt : null);
+        $activeSessionId = $agent['activeSessionId'];
+
+        try {
+            $this->send($activeSessionId, $prompt);
+        } catch (\RuntimeException $error) {
+            $this->run(['stop', $activeSessionId, '--json']);
+
+            throw $error;
+        }
+
+        return $agent;
+    }
+
+    /** @return array<string, mixed>&array{id?: mixed, activeSessionId: string} */
+    public function createSession(string $cwd, string $sessionMode = 'chat', ?string $initialGoal = null): array
+    {
         if ($this->binary() === null) {
             throw new \RuntimeException('Prime Agent is not installed.');
         }
-
         if (! in_array($sessionMode, ['chat', 'goal'], true)) {
             throw new \InvalidArgumentException('Unsupported Prime Agent session mode.');
+        }
+        if ($sessionMode === 'goal' && ($initialGoal === null || trim($initialGoal) === '')) {
+            throw new \InvalidArgumentException('A goal session requires an initial goal.');
         }
 
         $config = ['cwd' => $cwd];
         if ($sessionMode === 'goal') {
-            $config['initialGoal'] = ['objective' => $prompt];
+            $config['initialGoal'] = ['objective' => $initialGoal];
         }
 
         $agent = $this->daemonRequest([
@@ -128,13 +147,7 @@ class PrimeAgentRuntime
             throw new \RuntimeException('Prime Agent returned an invalid session identifier.');
         }
 
-        try {
-            $this->send($activeSessionId, $prompt);
-        } catch (\RuntimeException $error) {
-            $this->run(['stop', $activeSessionId, '--json']);
-
-            throw $error;
-        }
+        $agent['activeSessionId'] = $activeSessionId;
 
         return $agent;
     }

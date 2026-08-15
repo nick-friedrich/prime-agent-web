@@ -19,10 +19,12 @@ class AgentChatTest extends TestCase
     public function test_dashboard_sessions_link_to_the_chat_workspace(): void
     {
         $agent = ['id' => 'saved-1', 'activeSessionId' => 'active-1', 'firstMessage' => 'Prepare the release', 'cwd' => base_path(), 'messageCount' => 2];
+        $project = new Project(['name' => 'Prime Agent Web', 'slug' => 'prime-agent-web', 'path' => base_path(), 'color' => '#C8FF58']);
+        $project->id = 1;
 
         $this->view('dashboard', [
-            'projects' => collect(),
-            'activeProject' => null,
+            'projects' => collect([$project]),
+            'activeProject' => $project,
             'agents' => collect([$agent]),
             'primeAgentAvailable' => true,
             'primeAgentBinary' => '/usr/local/bin/prime-agent',
@@ -32,6 +34,8 @@ class AgentChatTest extends TestCase
         ])->assertSee('Prepare the release')
             ->assertDontSee('Stop agent')
             ->assertDontSee('Agent name')
+            ->assertDontSee('agent-modal')
+            ->assertSee(route('agents.create', ['project' => 'prime-agent-web']), false)
             ->assertSee(route('agents.show', ['sessionId' => 'saved-1']), false);
     }
 
@@ -215,7 +219,40 @@ class AgentChatTest extends TestCase
         $this->delete('/agents/saved-1')->assertStatus(409);
     }
 
-    public function test_starting_an_agent_requires_no_title(): void
+    public function test_the_new_chat_page_is_empty_and_preselects_the_requested_project(): void
+    {
+        $first = Project::create([
+            'name' => 'First project',
+            'slug' => 'first-project',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+        $second = Project::create([
+            'name' => 'Second project',
+            'slug' => 'second-project',
+            'path' => dirname(base_path()),
+            'color' => '#8B7CFF',
+        ]);
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('binary')->once()->andReturn('/usr/local/bin/prime-agent');
+        $runtime->shouldNotReceive('createSession');
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        $this->get(route('agents.create', ['project' => $second->slug]))
+            ->assertOk()
+            ->assertSee('New chat')
+            ->assertSee('What can I help you build?')
+            ->assertSee('Attach images or files')
+            ->assertSee('data-new-chat', false)
+            ->assertSee('value="'.$second->id.'" selected', false)
+            ->assertDontSee('data-transcript-url', false);
+
+        $this->assertNotSame($first->id, $second->id);
+    }
+
+    public function test_starting_a_chat_happens_on_the_first_message_and_redirects_to_it(): void
     {
         $project = Project::create([
             'name' => 'Prime Agent Web',
@@ -226,16 +263,176 @@ class AgentChatTest extends TestCase
         $runtime = Mockery::mock(PrimeAgentRuntime::class);
         $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
         $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
-        $runtime->shouldReceive('create')->once()->with(base_path(), 'Review the application.', 'chat')
+        $runtime->shouldReceive('createSession')->once()->with(base_path(), 'chat', null)
             ->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
+        $runtime->shouldReceive('send')->once()->with('active-1', 'Review the application.')
+            ->andReturn(['deliveryStatus' => 'accepted']);
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        $this->postJson(route('agents.store'), [
+            'project_id' => $project->id,
+            'message' => 'Review the application.',
+            'session_mode' => 'chat',
+        ])->assertCreated()
+            ->assertJsonPath('redirect', route('agents.show', ['sessionId' => 'saved-1']));
+    }
+
+    public function test_a_new_chat_can_start_with_attachments(): void
+    {
+        Storage::fake('local');
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('createSession')->once()->with(base_path(), 'chat', null)
+            ->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
+        $prompt = null;
+        $runtime->shouldReceive('prompt')->once()->with(
+            'active-1',
+            Mockery::on(function (string $message) use (&$prompt): bool {
+                $prompt = $message;
+
+                return str_contains($message, '<prime-agent-web-attachments>');
+            }),
+            Mockery::on(fn (array $images): bool => count($images) === 1 && ($images[0]['mimeType'] ?? null) === 'image/png'),
+        )->andReturn(['deliveryStatus' => 'accepted']);
         $this->app->instance(PrimeAgentRuntime::class, $runtime);
 
         $this->post(route('agents.store'), [
             'project_id' => $project->id,
-            'goal' => 'Review the application.',
             'session_mode' => 'chat',
-        ])->assertSessionHasNoErrors()
-            ->assertSessionHas('success', 'The agent was started in Prime Agent.');
+            'attachments' => [UploadedFile::fake()->image('brief.png')],
+        ], ['Accept' => 'application/json'])
+            ->assertCreated()
+            ->assertJsonPath('redirect', route('agents.show', ['sessionId' => 'saved-1']));
+
+        $this->assertIsString($prompt);
+        preg_match('/<prime-agent-web-attachments>(.*?)<\/prime-agent-web-attachments>/s', $prompt, $match);
+        $attachments = json_decode($match[1] ?? '', true);
+        $this->assertIsArray($attachments);
+        $this->assertSame('brief.png', $attachments[0]['name']);
+        $this->assertStringContainsString(hash('sha256', 'saved-1'), $attachments[0]['path']);
+        $this->assertFileExists($attachments[0]['path']);
+    }
+
+    public function test_a_failed_attachment_delivery_stops_the_session_and_removes_uploads(): void
+    {
+        Storage::fake('local');
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('createSession')->once()->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
+        $runtime->shouldReceive('prompt')->once()->andThrow(new \RuntimeException('Delivery failed.'));
+        $runtime->shouldReceive('stop')->once()->with('active-1');
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        $this->post(route('agents.store'), [
+            'project_id' => $project->id,
+            'session_mode' => 'chat',
+            'attachments' => [UploadedFile::fake()->createWithContent('brief.txt', 'ship it')],
+        ], ['Accept' => 'application/json'])
+            ->assertServiceUnavailable()
+            ->assertJsonPath('message', 'Delivery failed.');
+
+        $this->assertSame([], Storage::disk('local')->allFiles('agent-uploads'));
+    }
+
+    public function test_a_failed_first_delivery_stops_the_new_session(): void
+    {
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('createSession')->once()->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
+        $runtime->shouldReceive('send')->once()->andThrow(new \RuntimeException('Delivery failed.'));
+        $runtime->shouldReceive('stop')->once()->with('active-1');
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        $this->postJson(route('agents.store'), [
+            'project_id' => $project->id,
+            'message' => 'Review the application.',
+            'session_mode' => 'chat',
+        ])->assertServiceUnavailable()->assertJsonPath('message', 'Delivery failed.');
+    }
+
+    public function test_goal_sessions_cannot_start_with_only_an_attachment(): void
+    {
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+
+        $this->post(route('agents.store'), [
+            'project_id' => $project->id,
+            'session_mode' => 'goal',
+            'attachments' => [UploadedFile::fake()->createWithContent('brief.txt', 'ship it')],
+        ], ['Accept' => 'application/json'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('message');
+    }
+
+    public function test_goal_sessions_deliver_the_first_prompt_once(): void
+    {
+        Storage::fake('local');
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+        $runtime = Mockery::mock(PrimeAgentRuntime::class);
+        $runtime->shouldReceive('isAvailable')->once()->andReturn(true);
+        $runtime->shouldReceive('ensureDaemon')->once()->andReturn(['online' => true, 'error' => null]);
+        $runtime->shouldReceive('createSession')->once()->with(base_path(), 'goal', 'Ship the release.')
+            ->andReturn(['id' => 'saved-1', 'activeSessionId' => 'active-1']);
+        $runtime->shouldReceive('prompt')->once()->with(
+            'active-1',
+            Mockery::on(fn (string $message): bool => str_starts_with($message, "Ship the release.\n\n<prime-agent-web-attachments>")),
+            [],
+        )->andReturn(['deliveryStatus' => 'accepted']);
+        $runtime->shouldNotReceive('send');
+        $this->app->instance(PrimeAgentRuntime::class, $runtime);
+
+        $this->post(route('agents.store'), [
+            'project_id' => $project->id,
+            'session_mode' => 'goal',
+            'message' => 'Ship the release.',
+            'attachments' => [UploadedFile::fake()->createWithContent('brief.txt', 'ship it')],
+        ], ['Accept' => 'application/json'])->assertCreated();
+    }
+
+    public function test_a_blank_new_chat_is_rejected_before_a_session_is_created(): void
+    {
+        $project = Project::create([
+            'name' => 'Prime Agent Web',
+            'slug' => 'prime-agent-web',
+            'path' => base_path(),
+            'color' => '#C8FF58',
+        ]);
+
+        $this->postJson(route('agents.store'), [
+            'project_id' => $project->id,
+            'message' => '   ',
+            'session_mode' => 'chat',
+        ])->assertUnprocessable()->assertJsonValidationErrors('message');
     }
 
     /** @param list<array<string, mixed>> $agents */

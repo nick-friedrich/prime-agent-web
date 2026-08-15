@@ -35,7 +35,11 @@
             <div class="crumb"><span>Workspace</span><b>/</b><strong>{{ $activeProject?->name ?? 'Getting started' }}</strong></div>
             <div class="top-actions">
                 <button class="secondary-button" data-open-modal="project-modal"><span>＋</span> Add project</button>
-                <button class="primary-button" data-open-modal="agent-modal" @disabled(!$daemonOnline || $projects->isEmpty()) title="{{ !$daemonOnline ? 'Prime Agent runtime must be online' : ($projects->isEmpty() ? 'Add a project first' : '') }}"><span>＋</span> Start agent</button>
+                @if($daemonOnline && $projects->isNotEmpty())
+                    <a class="primary-button" href="{{ route('agents.create', $activeProject ? ['project' => $activeProject->slug] : []) }}"><span>＋</span> New chat</a>
+                @else
+                    <button class="primary-button" disabled title="{{ !$daemonOnline ? 'Prime Agent runtime must be online' : 'Add a project first' }}"><span>＋</span> New chat</button>
+                @endif
             </div>
         </header>
 
@@ -68,7 +72,10 @@
                     </article>
                     <article class="setup-step {{ $agents->isNotEmpty() ? 'done' : '' }}">
                         <span class="step-status">{{ $agents->isNotEmpty() ? '✓' : '4' }}</span><div><small>Step 4</small><h3>Start your first agent</h3><p>{{ $agents->isNotEmpty() ? 'Your first real session is active.' : 'Give Prime Agent a name and a concrete goal.' }}</p></div>
-                        @if($agents->isEmpty())<button class="primary-button" data-open-modal="agent-modal" @disabled(!$daemonOnline || $projects->isEmpty())>Start agent</button>@endif
+                        @if($agents->isEmpty())
+                            @if($daemonOnline && $projects->isNotEmpty())<a class="primary-button" href="{{ route('agents.create', $activeProject ? ['project' => $activeProject->slug] : []) }}">Start a chat</a>
+                            @else<button class="primary-button" disabled>Start a chat</button>@endif
+                        @endif
                     </article>
                 </div>
             </section>
@@ -130,14 +137,5 @@
     </form>
 </dialog>
 
-<dialog id="agent-modal" class="modal">
-    <form method="POST" action="{{ route('agents.store') }}">@csrf
-        <div class="modal-heading"><div><span class="modal-icon agent">↯</span><div><h2>Start a Prime Agent</h2><p>This creates a real daemon-backed session.</p></div></div><button type="button" data-close-modal>×</button></div>
-        <label>Project<select name="project_id" required><option value="">Select a project</option>@foreach($projects as $project)<option value="{{ $project->id }}" @selected(old('project_id', $activeProject?->id) == $project->id)>{{ $project->name }}</option>@endforeach</select></label>
-        <label>Session type<select name="session_mode" required><option value="chat" @selected(old('session_mode', 'chat') === 'chat')>Chat — respond to each message</option><option value="goal" @selected(old('session_mode') === 'goal')>Goal — persist until the objective is complete</option></select></label>
-        <label>First instruction<textarea name="goal" required rows="5" placeholder="Describe what you want the agent to do...">{{ old('goal') }}</textarea></label>
-        <div class="modal-actions"><button type="button" class="secondary-button" data-close-modal>Cancel</button><button class="primary-button" @disabled(!$daemonOnline || $projects->isEmpty())><span>＋</span> Start agent</button></div>
-    </form>
-</dialog>
 </body>
 </html>

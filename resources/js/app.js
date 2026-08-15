@@ -208,6 +208,7 @@ $$('.toast').forEach(toast => {
 
 const chatRoot = $('[data-chat]');
 if (chatRoot) {
+    const isNewChat = chatRoot.hasAttribute('data-new-chat');
     const transcriptNode = $('[data-chat-transcript]', chatRoot);
     const scrollNode = $('[data-chat-scroll]', chatRoot);
     const emptyNode = $('[data-chat-empty]', chatRoot);
@@ -227,6 +228,7 @@ if (chatRoot) {
     let polling = false;
     let pendingFiles = [];
     let dragDepth = 0;
+    let navigating = false;
 
     const atBottom = () => scrollNode.scrollHeight - scrollNode.scrollTop - scrollNode.clientHeight < 90;
     const formatTime = value => {
@@ -367,14 +369,17 @@ if (chatRoot) {
         const shouldFollow = atBottom() || transcriptNode.children.length === 0;
         const expanded = new Set($$('details[open][data-entry-id]', transcriptNode).map(node => node.dataset.entryId));
         const items = payload.transcript?.items || [];
+        const agent = payload.agent || {};
         transcriptNode.replaceChildren(...items.map(item => renderItem(item, expanded)));
         emptyNode.hidden = items.length > 0;
         if (payload.transcript?.available === false) {
+            const starting = payload.transcript.error === 'The transcript file is not available yet.';
             emptyNode.hidden = false;
-            $('h2', emptyNode).textContent = 'Transcript unavailable';
-            $('p', emptyNode).textContent = payload.transcript.error || 'Prime Agent has not written this transcript yet.';
+            $('h2', emptyNode).textContent = starting ? 'Starting conversation' : 'Transcript unavailable';
+            $('p', emptyNode).textContent = starting
+                ? 'Your message was delivered. Waiting for the agent to begin…'
+                : payload.transcript.error || 'Prime Agent has not written this transcript yet.';
         }
-        const agent = payload.agent || {};
         const title = $('[data-chat-title]', chatRoot);
         if (title && agent.firstMessage) {
             const displayTitle = agent.firstMessage.length > 72 ? `${agent.firstMessage.slice(0, 69)}...` : agent.firstMessage;
@@ -422,9 +427,11 @@ if (chatRoot) {
         }
     };
 
-    try { render(JSON.parse(initialNode.textContent)); } catch { poll(); }
-    setInterval(poll, 2000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+    if (!isNewChat) {
+        try { render(JSON.parse(initialNode.textContent)); } catch { poll(); }
+        setInterval(poll, 2000);
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+    }
 
     let previewObjectUrls = [];
     const clearPreviewUrls = () => {
@@ -541,6 +548,7 @@ if (chatRoot) {
         event.preventDefault();
         const message = input.value.trim();
         if (!message && pendingFiles.length === 0) return;
+        if (navigating || sendButton.disabled) return;
         sendButton.disabled = true;
         attachButton.disabled = true;
         input.disabled = true;
@@ -550,8 +558,12 @@ if (chatRoot) {
         const formData = new FormData();
         formData.append('message', message);
         pendingFiles.forEach(file => formData.append('attachments[]', file, file.name));
+        if (isNewChat) {
+            formData.append('project_id', $('[name="project_id"]').value);
+            formData.append('session_mode', $('[name="session_mode"]').value);
+        }
         try {
-            const response = await fetch(chatRoot.dataset.messageUrl, {
+            const response = await fetch(isNewChat ? chatRoot.dataset.createUrl : chatRoot.dataset.messageUrl, {
                 method: 'POST',
                 headers: {
                     Accept: 'application/json',
@@ -563,6 +575,11 @@ if (chatRoot) {
             if (!response.ok) {
                 const validation = Object.values(body.errors || {}).flat()[0];
                 throw new Error(validation || body.message || 'Prime Agent did not accept the message.');
+            }
+            if (isNewChat) {
+                navigating = true;
+                window.location.assign(body.redirect);
+                return;
             }
             input.value = '';
             pendingFiles = [];
@@ -577,15 +594,17 @@ if (chatRoot) {
             feedback.textContent = error.message || 'Could not send the message.';
             feedback.classList.add('error');
         } finally {
-            sendButton.disabled = false;
-            attachButton.disabled = false;
-            input.disabled = false;
-            $$('button', attachmentPreview).forEach(button => { button.disabled = false; });
-            input.focus();
+            if (!navigating) {
+                sendButton.disabled = false;
+                attachButton.disabled = false;
+                input.disabled = false;
+                $$('button', attachmentPreview).forEach(button => { button.disabled = false; });
+                input.focus();
+            }
         }
     });
 
-    stopButton.addEventListener('click', async () => {
+    stopButton?.addEventListener('click', async () => {
         if (!window.confirm('Stop this agent? You can resume its saved session later.')) return;
         stopButton.disabled = true;
         feedback.classList.remove('error', 'success');
